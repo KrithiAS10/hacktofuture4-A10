@@ -43,16 +43,26 @@ export interface ClusterSummaryResponse {
     non_running?: Array<{ namespace: string; name: string; phase: string }>
     top_restarting?: Array<{ namespace: string; name: string; restarts: number; reason?: string | null }>
   }
-  recent_events?: Array<{
-    type?: string
-    reason?: string
-    namespace?: string
-    object?: string
-    message?: string
-    count?: number
-    last_timestamp?: string
-  }>
-}
+    recent_events?: Array<{
+      type?: string
+      reason?: string
+      namespace?: string
+      object?: string
+      message?: string
+      count?: number
+      last_timestamp?: string
+    }>
+    metrics?: {
+      cpu_percentage: number | null
+      memory_percentage: number | null
+      cpu_available?: boolean
+      memory_available?: boolean
+      cpu_query?: string | null
+      memory_query?: string | null
+      cpu_reason?: string | null
+      memory_reason?: string | null
+    }
+  }
 
 export interface LokiQueryResponse {
   data?: {

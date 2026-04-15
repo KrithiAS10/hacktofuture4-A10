@@ -14,6 +14,11 @@ data:
             endpoint: 0.0.0.0:4318
       k8s_events:
         auth_type: serviceAccount
+      kubeletstats:
+        collection_interval: 15s
+        auth_type: serviceAccount
+        endpoint: https://${NODE_IP}:10250
+        insecure_skip_verify: true
     processors:
       memory_limiter:
         check_interval: 1s
@@ -84,7 +89,7 @@ data:
           processors: [memory_limiter, k8sattributes, resourcedetection, resource, resource/canonical, batch]
           exporters: [otlp/jaeger, debug]
         metrics:
-          receivers: [otlp]
+          receivers: [otlp, kubeletstats]
           processors: [memory_limiter, k8sattributes, resourcedetection, resource, resource/canonical, batch]
           exporters: [prometheus, debug]
         logs:

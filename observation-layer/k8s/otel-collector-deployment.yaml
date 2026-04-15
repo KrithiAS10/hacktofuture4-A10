@@ -18,6 +18,11 @@ spec:
         - name: otel-collector
           image: otel/opentelemetry-collector-contrib:0.113.0
           args: ["--config=/conf/otel-collector-k8s-config.yaml"]
+          env:
+            - name: NODE_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.hostIP
           ports:
             - containerPort: 4317
               name: otlp-grpc

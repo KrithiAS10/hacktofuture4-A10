@@ -45,6 +45,8 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true)
   const [clusterHealth, setClusterHealth] = useState<ClusterHealthResponse | null>(null)
   const [clusterSummary, setClusterSummary] = useState<ClusterSummaryResponse | null>(null)
+  const [cpuHistory, setCpuHistory] = useState<number[]>([])
+  const [memHistory, setMemHistory] = useState<number[]>([])
 
   useEffect(() => {
     let active = true
@@ -54,6 +56,16 @@ export default function DashboardPage() {
         if (!active) return
         setClusterHealth(health)
         setClusterSummary(summary)
+
+        const metrics = summary.metrics
+        if (metrics?.cpu_available && metrics.cpu_percentage != null) {
+          const cpuPercentage = metrics.cpu_percentage
+          setCpuHistory((prev) => [...prev.slice(-19), cpuPercentage])
+        }
+        if (metrics?.memory_available && metrics.memory_percentage != null) {
+          const memoryPercentage = metrics.memory_percentage
+          setMemHistory((prev) => [...prev.slice(-19), memoryPercentage])
+        }
       } catch {
         if (!active) return
         setClusterHealth(null)
@@ -75,6 +87,10 @@ export default function DashboardPage() {
   const servicesTotal = clusterHealth?.services?.total ?? 0
   const servicesDown = clusterHealth?.services?.without_ready_endpoints_count ?? 0
   const score = clusterHealth?.score_hint ?? 0
+  const cpuValue = clusterSummary?.metrics?.cpu_percentage
+  const memValue = clusterSummary?.metrics?.memory_percentage
+  const cpuAvailable = clusterSummary?.metrics?.cpu_available ?? false
+  const memAvailable = clusterSummary?.metrics?.memory_available ?? false
 
   return (
     <div className="p-7 flex flex-col gap-6">
@@ -143,20 +159,34 @@ export default function DashboardPage() {
         className="grid grid-cols-1 md:grid-cols-3 gap-4"
       >
         <motion.div variants={item} className="bg-bg-2 border border-border rounded-2xl p-5 hover:border-border-2 transition-colors">
-          <div className="text-[11px] font-semibold text-[#8A9BBB] font-mono mb-1">Health Score</div>
-          <div className="text-xl font-black text-lerna-blue2 mb-4">{Math.min(100, score)}%</div>
-          <SparklineChart color="#3B82F6" gradientId="cpu" baseValue={65} height={100} showTooltip />
+          <div className="text-[11px] font-semibold text-[#8A9BBB] font-mono mb-1">Cluster CPU Usage</div>
+          <div className="text-xl font-black text-lerna-blue2 mb-4">
+            {cpuAvailable && cpuValue != null ? `${cpuValue}%` : 'N/A'}
+          </div>
+          {!cpuAvailable && clusterSummary?.metrics?.cpu_reason ? (
+            <div className="mb-4 text-[11px] text-[#8A9BBB] font-mono">
+              {clusterSummary.metrics.cpu_reason}
+            </div>
+          ) : null}
+          <SparklineChart color="#3B82F6" gradientId="cpu" data={cpuHistory} height={100} showTooltip />
         </motion.div>
 
         <motion.div variants={item} className="bg-bg-2 border border-border rounded-2xl p-5 hover:border-border-2 transition-colors">
-          <div className="text-[11px] font-semibold text-[#8A9BBB] font-mono mb-1">Restarting Pods</div>
-          <div className="text-xl font-black text-lerna-purple2 mb-4">{clusterSummary?.pods?.restarting_count ?? 0} restarting</div>
-          <SparklineChart color="#A855F7" gradientId="mem" baseValue={55} height={100} showTooltip />
+          <div className="text-[11px] font-semibold text-[#8A9BBB] font-mono mb-1">Cluster Memory Usage</div>
+          <div className="text-xl font-black text-lerna-purple2 mb-4">
+            {memAvailable && memValue != null ? `${memValue}%` : 'N/A'}
+          </div>
+          {!memAvailable && clusterSummary?.metrics?.memory_reason ? (
+            <div className="mb-4 text-[11px] text-[#8A9BBB] font-mono">
+              {clusterSummary.metrics.memory_reason}
+            </div>
+          ) : null}
+          <SparklineChart color="#A855F7" gradientId="mem" data={memHistory} height={100} showTooltip />
         </motion.div>
 
         <motion.div variants={item} className="bg-bg-2 border border-border rounded-2xl p-5 hover:border-border-2 transition-colors">
-          <div className="text-[11px] font-semibold text-[#8A9BBB] font-mono mb-1">Non-running Pods</div>
-          <div className="text-xl font-black text-lerna-cyan mb-4">{clusterSummary?.pods?.non_running_count ?? 0} pods affected</div>
+          <div className="text-[11px] font-semibold text-[#8A9BBB] font-mono mb-1">P95 Latency</div>
+          <div className="text-xl font-black text-lerna-cyan mb-4">142ms</div>
           <SparklineChart color="#06B6D4" gradientId="lat" data={latencyData} labels={timeLabels} height={100} showTooltip />
         </motion.div>
       </motion.div>

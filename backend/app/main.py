@@ -10,7 +10,7 @@ from app.services.cluster_poller import ClusterPoller
 from app.services.observability import ObservabilityService
 
 obs_service = ObservabilityService()
-cluster_poller = ClusterPoller()
+cluster_poller = ClusterPoller(obs_service=obs_service)
 
 
 @asynccontextmanager
