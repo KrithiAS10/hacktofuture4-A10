@@ -128,14 +128,18 @@ async def run_detection_check(
             log_limit=log_limit,
         )
     except Exception as exc:  # pylint: disable=broad-except
-        raise HTTPException(status_code=502, detail=f"Detection check failed: {exc}") from exc
+        logger.exception("Detection check failed")
+        raise HTTPException(
+            status_code=502,
+            detail="Detection check failed due to an internal error.",
+        ) from exc
 
 
 @app.get("/api/agents/prompts", response_model=AgentPromptsResponse)
 async def get_agent_prompts(ids: Optional[str] = Query(None, description="Comma-separated agent IDs")):
     try:
-        agent_ids = [item.strip() for item in ids.split(",")] if ids else None
-        agent_ids = [item for item in agent_ids or [] if item]
+        agent_ids = [item.strip() for item in ids.split(",")] if ids else []
+        agent_ids = [item for item in agent_ids if item]
         prompts = await prompt_store.get_prompts(agent_ids if agent_ids else None)
         return AgentPromptsResponse(
             prompts=[AgentPromptEntry(agent_id=agent_id, prompt=prompt) for agent_id, prompt in prompts.items()]

@@ -1,6 +1,6 @@
 'use client'
 // src/app/agents/page.tsx
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { motion } from 'framer-motion'
 import { CircleCheckBig, CircleAlert, Edit3, RotateCcw, Save, X } from 'lucide-react'
 import { Badge, Button, PageHeader } from '@/components/ui'
@@ -90,13 +90,13 @@ export default function AgentsPage() {
     setInitialPrompt(currentPrompt)
   }
 
-  const closeEditor = () => {
+  const closeEditor = useCallback(() => {
     setEditingAgentId(null)
     setDraftPrompt('')
     setInitialPrompt('')
-  }
+  }, [])
 
-  const savePrompt = async () => {
+  const savePrompt = useCallback(async () => {
     if (!editingAgentId) return
     try {
       setSavingAgentId(editingAgentId)
@@ -111,7 +111,7 @@ export default function AgentsPage() {
     } finally {
       setSavingAgentId(null)
     }
-  }
+  }, [editingAgentId, draftPrompt, agentNameById, closeEditor])
 
   const resetPromptToDefault = async () => {
     if (!editingAgentId) return
@@ -134,6 +134,15 @@ export default function AgentsPage() {
     }
   }
 
+  const isBusy = Boolean(
+    editingAgentId &&
+    (savingAgentId === editingAgentId || resettingAgentId === editingAgentId)
+  )
+  const normalizedInitial = initialPrompt.trim()
+  const normalizedDraft = draftPrompt.trim()
+  const isDirty = editingAgentId ? normalizedDraft !== normalizedInitial : false
+  const canSave = Boolean(editingAgentId && isDirty && normalizedDraft.length > 0 && !isBusy)
+
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (!editingAgentId) return
@@ -147,16 +156,7 @@ export default function AgentsPage() {
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  })
-
-  const isBusy = Boolean(
-    editingAgentId &&
-    (savingAgentId === editingAgentId || resettingAgentId === editingAgentId)
-  )
-  const normalizedInitial = initialPrompt.trim()
-  const normalizedDraft = draftPrompt.trim()
-  const isDirty = editingAgentId ? normalizedDraft !== normalizedInitial : false
-  const canSave = Boolean(editingAgentId && isDirty && normalizedDraft.length > 0 && !isBusy)
+  }, [editingAgentId, canSave, closeEditor, savePrompt])
 
   return (
     <div className="p-7 flex flex-col gap-6">

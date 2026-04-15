@@ -1,12 +1,14 @@
 from __future__ import annotations
 
+import logging
 from collections import Counter
 from datetime import datetime, timezone
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from app.models import DetectionCheckResponse, DetectionEvidence
 from app.services.observability import ObservabilityService
 
+logger = logging.getLogger(__name__)
 
 ERROR_KEYWORDS = ("error", "exception", "fail", "failed", "panic", "fatal", "timeout")
 WARN_KEYWORDS = ("warn", "warning", "degraded", "retry")
@@ -102,9 +104,10 @@ class DetectionService:
         return "info"
 
     @staticmethod
-    def _nanos_to_iso(raw: str) -> str:
+    def _nanos_to_iso(raw: str) -> Optional[str]:
         try:
             ts_seconds = int(raw) / 1_000_000_000
             return datetime.fromtimestamp(ts_seconds, tz=timezone.utc).isoformat()
         except Exception:  # pylint: disable=broad-except
-            return datetime.now(tz=timezone.utc).isoformat()
+            logger.warning("Could not parse Loki timestamp nanoseconds: %r", raw)
+            return None

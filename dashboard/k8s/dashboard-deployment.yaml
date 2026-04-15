@@ -17,12 +17,11 @@ spec:
         - name: dashboard
           image: lerna-dashboard:latest
           imagePullPolicy: Never
-          env:
-            - name: BACKEND_BASE_URL
-              value: http://lerna-backend:8000
           ports:
             - containerPort: 3000
           env:
+            - name: BACKEND_BASE_URL
+              value: http://lerna-backend:8000
             - name: HOSTNAME
               value: "0.0.0.0"
 ---
