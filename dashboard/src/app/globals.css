@@ -1,0 +1,106 @@
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Syne:wght@400;500;600;700;800&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg: #080B14;
+  --bg2: #0D1120;
+  --bg3: #111827;
+  --bg4: #1A2236;
+  --border: #1E2D45;
+  --border2: #243352;
+  --blue: #3B82F6;
+  --blue2: #60A5FA;
+  --purple: #A855F7;
+  --purple2: #C084FC;
+  --green: #10B981;
+  --red: #EF4444;
+  --amber: #F59E0B;
+  --cyan: #06B6D4;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  background-color: var(--bg);
+  color: #E8EDF5;
+  font-family: 'Syne', sans-serif;
+  overflow-x: hidden;
+  scroll-behavior: smooth;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border2);
+  border-radius: 2px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #3B4F6E;
+}
+
+/* Terminal scrollbar */
+.terminal-scroll::-webkit-scrollbar {
+  width: 3px;
+}
+
+/* Pulse animations */
+@keyframes pulse-green {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.4); }
+  50% { box-shadow: 0 0 0 6px rgba(16, 185, 129, 0); }
+}
+
+@keyframes pulse-amber {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.4); }
+  50% { box-shadow: 0 0 0 6px rgba(245, 158, 11, 0); }
+}
+
+@keyframes pulse-blue {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.4); }
+  50% { box-shadow: 0 0 0 6px rgba(59, 130, 246, 0); }
+}
+
+.pulse-green { animation: pulse-green 1.5s ease-in-out infinite; }
+.pulse-amber { animation: pulse-amber 0.8s ease-in-out infinite; }
+.pulse-blue  { animation: pulse-blue  1.5s ease-in-out infinite; }
+
+/* Glow effects */
+.glow-blue  { box-shadow: 0 4px 20px rgba(59, 130, 246, 0.3); }
+.glow-purple { box-shadow: 0 4px 20px rgba(168, 85, 247, 0.3); }
+.glow-red    { box-shadow: 0 4px 15px rgba(239, 68, 68, 0.3); }
+
+/* Gradient text */
+.gradient-text {
+  background: linear-gradient(90deg, #60A5FA, #C084FC);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* Glass card */
+.glass-card {
+  background: rgba(13, 17, 32, 0.8);
+  backdrop-filter: blur(12px);
+  border: 1px solid var(--border);
+}
+
+/* Typing animation */
+@keyframes typing-dot {
+  0%, 60%, 100% { opacity: 0.3; transform: scale(1); }
+  30% { opacity: 1; transform: scale(1.3); }
+}
+
+.typing-dot:nth-child(1) { animation: typing-dot 1.4s infinite; }
+.typing-dot:nth-child(2) { animation: typing-dot 1.4s infinite 0.2s; }
+.typing-dot:nth-child(3) { animation: typing-dot 1.4s infinite 0.4s; }
