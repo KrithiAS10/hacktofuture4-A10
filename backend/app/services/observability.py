@@ -12,6 +12,10 @@ from app.models import BackendStatus, HealthResponse
 class ObservabilityService:
     def __init__(self) -> None:
         self._timeout = httpx.Timeout(10.0, connect=5.0)
+        self._client = httpx.AsyncClient(timeout=self._timeout)
+
+    async def close(self) -> None:
+        await self._client.aclose()
 
     async def check_health(self) -> HealthResponse:
         prometheus = await self._check_endpoint(
@@ -83,23 +87,21 @@ class ObservabilityService:
 
     async def _check_endpoint(self, endpoint: str, fallback: str) -> BackendStatus:
         try:
-            async with httpx.AsyncClient(timeout=self._timeout) as client:
-                response = await client.get(endpoint)
-                if response.status_code < 400:
-                    return BackendStatus(ok=True, endpoint=endpoint)
-                fallback_response = await client.get(fallback)
-                if fallback_response.status_code < 400:
-                    return BackendStatus(ok=True, endpoint=fallback, detail=f"fallback used; {response.status_code}")
-                return BackendStatus(
-                    ok=False,
-                    endpoint=endpoint,
-                    detail=f"primary={response.status_code}, fallback={fallback_response.status_code}",
-                )
+            response = await self._client.get(endpoint)
+            if response.status_code < 400:
+                return BackendStatus(ok=True, endpoint=endpoint)
+            fallback_response = await self._client.get(fallback)
+            if fallback_response.status_code < 400:
+                return BackendStatus(ok=True, endpoint=fallback, detail=f"fallback used; {response.status_code}")
+            return BackendStatus(
+                ok=False,
+                endpoint=endpoint,
+                detail=f"primary={response.status_code}, fallback={fallback_response.status_code}",
+            )
         except Exception as exc:  # pylint: disable=broad-except
             return BackendStatus(ok=False, endpoint=endpoint, detail=str(exc))
 
     async def _get_json(self, url: str, params: Dict[str, Any]) -> Dict[str, Any]:
-        async with httpx.AsyncClient(timeout=self._timeout) as client:
-            response = await client.get(url, params=params)
-            response.raise_for_status()
-            return response.json()
+        response = await self._client.get(url, params=params)
+        response.raise_for_status()
+        return response.json()

@@ -19,6 +19,7 @@ class Settings:
         self.enable_k8s_poller = _as_bool(os.getenv("ENABLE_K8S_POLLER", "True"), True)
         self.k8s_namespace_scope = os.getenv("K8S_NAMESPACE_SCOPE", "").strip()
         self.poll_interval_seconds = int(os.getenv("POLL_INTERVAL_SECONDS", "15"))
+        self.poll_timeout_seconds = int(os.getenv("POLL_TIMEOUT_SECONDS", "20"))
 
 
 settings = Settings()

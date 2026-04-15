@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from kubernetes import client, config
 from app.config import settings
+
+logger = logging.getLogger(__name__)
 
 
 class ClusterPoller:
@@ -66,13 +69,16 @@ class ClusterPoller:
             return
 
         try:
-            nodes, deployments, services, endpoints, pods, events = await asyncio.gather(
-                asyncio.to_thread(self._list_nodes),
-                asyncio.to_thread(self._list_deployments),
-                asyncio.to_thread(self._list_services),
-                asyncio.to_thread(self._list_endpoints),
-                asyncio.to_thread(self._list_pods),
-                asyncio.to_thread(self._list_events),
+            nodes, deployments, services, endpoints, pods, events = await asyncio.wait_for(
+                asyncio.gather(
+                    asyncio.to_thread(self._list_nodes),
+                    asyncio.to_thread(self._list_deployments),
+                    asyncio.to_thread(self._list_services),
+                    asyncio.to_thread(self._list_endpoints),
+                    asyncio.to_thread(self._list_pods),
+                    asyncio.to_thread(self._list_events),
+                ),
+                timeout=settings.poll_timeout_seconds,
             )
             self._snapshot = {
                 "available": True,
@@ -85,6 +91,7 @@ class ClusterPoller:
                 "recent_events": self._summarize_events(events),
             }
         except Exception as exc:  # pylint: disable=broad-except
+            logger.exception("Cluster poller failed to refresh snapshot")
             self._snapshot = {
                 "available": False,
                 "last_updated": datetime.now(tz=timezone.utc).isoformat(),

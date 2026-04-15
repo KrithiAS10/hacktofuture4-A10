@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Query
@@ -8,20 +9,21 @@ from app.models import ClusterSummary, HealthResponse
 from app.services.cluster_poller import ClusterPoller
 from app.services.observability import ObservabilityService
 
-app = FastAPI(title="Lerna Observation Backend", version="0.1.0")
-
 obs_service = ObservabilityService()
 cluster_poller = ClusterPoller()
 
 
-@app.on_event("startup")
-async def on_startup() -> None:
+@asynccontextmanager
+async def lifespan(_: FastAPI):
     await cluster_poller.start()
+    try:
+        yield
+    finally:
+        await cluster_poller.stop()
+        await obs_service.close()
 
 
-@app.on_event("shutdown")
-async def on_shutdown() -> None:
-    await cluster_poller.stop()
+app = FastAPI(title="Lerna Observation Backend", version="0.1.0", lifespan=lifespan)
 
 
 @app.get("/api/obs/health", response_model=HealthResponse)

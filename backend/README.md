@@ -33,6 +33,7 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 - `ENABLE_K8S_POLLER` (default: `true`)
 - `K8S_NAMESPACE_SCOPE` (default: empty, meaning all namespaces)
 - `POLL_INTERVAL_SECONDS` (default: `15`)
+- `POLL_TIMEOUT_SECONDS` (default: `20`)
 
 ## Notes
 
