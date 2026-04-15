@@ -8,19 +8,20 @@ module.exports = {
   theme: {
     extend: {
       fontFamily: {
-        sans: ['Syne', 'sans-serif'],
-        mono: ['JetBrains Mono', 'monospace'],
+        sans: ['DM Sans', 'system-ui', 'sans-serif'],
+        display: ['Syne', 'system-ui', 'sans-serif'],
+        mono: ['JetBrains Mono', 'ui-monospace', 'monospace'],
       },
       colors: {
         bg: {
-          DEFAULT: '#080B14',
-          2: '#0D1120',
+          DEFAULT: '#070a12',
+          2: '#0c101c',
           3: '#111827',
-          4: '#1A2236',
+          4: '#1a2234',
         },
         border: {
-          DEFAULT: '#1E2D45',
-          2: '#243352',
+          DEFAULT: '#1e2a40',
+          2: '#2a3a58',
         },
         lerna: {
           blue: '#3B82F6',

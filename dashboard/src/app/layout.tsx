@@ -11,10 +11,10 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
-      <body className="flex min-h-screen bg-bg text-[#E8EDF5]">
+      <body className="flex min-h-screen bg-bg text-[#e8edf5]">
         <Sidebar />
-        <main className="ml-[var(--sidebar-width)] flex-1 min-h-screen">
-          {children}
+        <main className="app-canvas ml-[var(--sidebar-width)] flex-1 min-h-screen">
+          <div className="app-canvas-inner">{children}</div>
         </main>
       </body>
     </html>

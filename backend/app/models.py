@@ -25,3 +25,37 @@ class ClusterSummary(BaseModel):
     services: Dict[str, Any] = {}
     pods: Dict[str, Any] = {}
     recent_events: List[Dict[str, Any]] = []
+
+
+class DetectionEvidence(BaseModel):
+    signal_type: str
+    source: str
+    severity: str
+    message: str
+    timestamp: Optional[str] = None
+
+
+class DetectionCheckResponse(BaseModel):
+    has_error: bool
+    message: str
+    checked_at: str
+    summary: Dict[str, int]
+    evidence: List[DetectionEvidence]
+
+
+class AgentPromptUpdateRequest(BaseModel):
+    prompt: str
+
+
+class AgentPromptEntry(BaseModel):
+    agent_id: str
+    prompt: str
+
+
+class AgentPromptsResponse(BaseModel):
+    prompts: List[AgentPromptEntry]
+
+
+class AgentPromptResetResponse(BaseModel):
+    agent_id: str
+    reset: bool

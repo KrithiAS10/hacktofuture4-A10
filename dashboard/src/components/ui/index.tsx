@@ -43,21 +43,25 @@ export function Button({
   onClick,
   className,
   type = 'button',
+  disabled = false,
 }: {
   variant?: ButtonVariant
   children: ReactNode
   onClick?: () => void
   className?: string
   type?: 'button' | 'submit'
+  disabled?: boolean
 }) {
   return (
     <motion.button
-      whileHover={{ scale: variant === 'primary' ? 1.01 : 1 }}
-      whileTap={{ scale: 0.97 }}
+      whileHover={{ scale: disabled ? 1 : variant === 'primary' ? 1.01 : 1 }}
+      whileTap={{ scale: disabled ? 1 : 0.97 }}
       type={type}
-      onClick={onClick}
+      onClick={disabled ? undefined : onClick}
+      disabled={disabled}
       className={clsx(
         'inline-flex items-center gap-2 px-4 py-2 rounded-lg text-[13px] font-semibold cursor-pointer transition-all duration-150 font-sans',
+        disabled && 'opacity-50 cursor-not-allowed pointer-events-none',
         buttonStyles[variant],
         className
       )}
@@ -70,15 +74,19 @@ export function Button({
 // ─── Card ────────────────────────────────────────────────────────────────────
 export function Card({ children, className, glow }: { children: ReactNode; className?: string; glow?: 'blue' | 'purple' }) {
   return (
-    <div className={clsx(
-      'relative bg-bg-2 border border-border rounded-2xl overflow-hidden transition-colors duration-200 hover:border-border-2',
-      className
-    )}>
+    <div
+      className={clsx(
+        'relative overflow-hidden rounded-xl border border-border bg-bg-2/90 shadow-[0_1px_0_rgba(255,255,255,0.04)_inset] transition-colors duration-200 hover:border-border-2',
+        className
+      )}
+    >
       {glow && (
-        <div className={clsx(
-          'absolute -top-10 -right-10 w-24 h-24 rounded-full blur-3xl',
-          glow === 'blue' ? 'bg-[rgba(59,130,246,0.15)]' : 'bg-[rgba(168,85,247,0.15)]'
-        )} />
+        <div
+          className={clsx(
+            'pointer-events-none absolute -right-8 -top-8 h-28 w-28 rounded-full blur-3xl',
+            glow === 'blue' ? 'bg-[rgba(59,130,246,0.12)]' : 'bg-[rgba(168,85,247,0.12)]'
+          )}
+        />
       )}
       {children}
     </div>
@@ -88,7 +96,7 @@ export function Card({ children, className, glow }: { children: ReactNode; class
 // ─── SectionTitle ─────────────────────────────────────────────────────────────
 export function SectionTitle({ children }: { children: ReactNode }) {
   return (
-    <div className="text-[11px] font-semibold text-[#4A5B7A] tracking-widest uppercase font-mono mb-3">
+    <div className="mb-3 font-mono text-[10px] font-semibold uppercase tracking-[0.16em] text-[#5c6d8c]">
       {children}
     </div>
   )
@@ -97,12 +105,12 @@ export function SectionTitle({ children }: { children: ReactNode }) {
 // ─── PageHeader ───────────────────────────────────────────────────────────────
 export function PageHeader({ title, subtitle, children }: { title: string; subtitle?: string; children?: ReactNode }) {
   return (
-    <div className="flex items-start justify-between gap-4 flex-wrap">
-      <div>
-        <h1 className="text-[22px] font-black tracking-tight">{title}</h1>
-        {subtitle && <p className="text-xs text-[#4A5B7A] font-mono mt-1">{subtitle}</p>}
+    <div className="flex flex-wrap items-start justify-between gap-4 border-b border-border/80 pb-6">
+      <div className="min-w-0">
+        <h1 className="font-display text-2xl font-semibold tracking-tight text-white md:text-[26px]">{title}</h1>
+        {subtitle && <p className="mt-1.5 max-w-xl text-[13px] leading-relaxed text-[#8a9bbb]">{subtitle}</p>}
       </div>
-      {children && <div className="flex items-center gap-2.5 flex-wrap">{children}</div>}
+      {children && <div className="flex flex-wrap items-center gap-2">{children}</div>}
     </div>
   )
 }
@@ -127,15 +135,13 @@ export function StatCard({
 }) {
   return (
     <Card glow={glow} className="p-5">
-      <div className="text-[11px] font-semibold text-[#4A5B7A] tracking-widest uppercase font-mono mb-2.5">
-        {label}
-      </div>
-      <div className={clsx('text-[32px] font-black tracking-tight leading-none', valueColor)}>
+      <div className="mb-3 font-mono text-[10px] font-semibold uppercase tracking-[0.14em] text-[#5c6d8c]">{label}</div>
+      <div className={clsx('text-[26px] font-bold tabular-nums tracking-tight leading-none md:text-[28px]', valueColor)}>
         {value}
       </div>
-      {sub && <div className="text-xs text-[#8A9BBB] mt-1.5">{sub}</div>}
+      {sub && <div className="mt-2 text-[12px] leading-snug text-[#8a9bbb]">{sub}</div>}
       {icon && (
-        <div className={clsx('absolute top-4 right-4 w-9 h-9 rounded-xl flex items-center justify-center', iconBg)}>
+        <div className={clsx('absolute right-4 top-4 flex h-10 w-10 items-center justify-center rounded-lg', iconBg)}>
           {icon}
         </div>
       )}
