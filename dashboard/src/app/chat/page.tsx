@@ -7,8 +7,6 @@ import { Badge, PageHeader } from '@/components/ui'
 import { initialChatMessages, cannedResponses, type ChatMessage } from '@/lib/mock-data'
 import clsx from 'clsx'
 
-let cannedIdx = 0
-
 function renderContent(text: string) {
   // Bold: **text**, Code: `text`
   const parts = text.split(/(\*\*.*?\*\*|`.*?`)/g)
@@ -46,6 +44,7 @@ export default function ChatPage() {
   const [isTyping, setIsTyping] = useState(false)
   const bottomRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const cannedIdx = useRef(0)
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -69,8 +68,8 @@ export default function ChatPage() {
 
     await new Promise(r => setTimeout(r, 1500 + Math.random() * 800))
 
-    const reply = cannedResponses[cannedIdx % cannedResponses.length]
-    cannedIdx++
+    const reply = cannedResponses[cannedIdx.current % cannedResponses.length]
+    cannedIdx.current++
     const assistantMsg: ChatMessage = { id: (Date.now() + 1).toString(), role: 'assistant', content: reply, timestamp: now() }
     setMessages(prev => [...prev, assistantMsg])
     setIsTyping(false)

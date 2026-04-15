@@ -5,6 +5,7 @@
 @tailwind utilities;
 
 :root {
+  --sidebar-width: 220px;
   --bg: #080B14;
   --bg2: #0D1120;
   --bg3: #111827;

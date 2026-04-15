@@ -3,22 +3,21 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { motion } from 'framer-motion'
-import { LayoutDashboard, AlertTriangle, FileText, Bot, MessageSquare } from 'lucide-react'
+import { LayoutDashboard, AlertTriangle, Bot, MessageSquare } from 'lucide-react'
 import clsx from 'clsx'
 
 const navItems = [
-  { href: '/dashboard', label: 'Dashboard',       icon: LayoutDashboard, badge: null },
-  { href: '/incidents', label: 'Incidents',        icon: AlertTriangle,   badge: '3'  },
-  { href: '/incidents/INC-2024-0891', label: 'Incident Detail', icon: FileText, badge: null },
-  { href: '/agents',   label: 'Agents',            icon: Bot,             badge: null },
-  { href: '/chat',     label: 'Chat Panel',        icon: MessageSquare,   badge: null },
+  { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard, badge: null },
+  { href: '/incidents', label: 'Incidents', icon: AlertTriangle,   badge: '3'  },
+  { href: '/agents',   label: 'Agents',    icon: Bot,             badge: null },
+  { href: '/chat',     label: 'Chat Panel', icon: MessageSquare,   badge: null },
 ]
 
 export function Sidebar() {
   const pathname = usePathname()
 
   return (
-    <aside className="fixed left-0 top-0 w-[220px] h-screen bg-bg-2 border-r border-border flex flex-col z-50">
+    <aside className="fixed left-0 top-0 w-[var(--sidebar-width)] h-screen bg-bg-2 border-r border-border flex flex-col z-50">
       {/* Logo */}
       <div className="px-5 py-5 border-b border-border flex items-center gap-3">
         <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-lerna-blue to-lerna-purple flex items-center justify-center text-white font-black text-sm shadow-lg">
@@ -34,9 +33,10 @@ export function Sidebar() {
       <nav className="flex-1 px-2 py-3 flex flex-col gap-0.5">
         {navItems.map((item) => {
           const Icon = item.icon
-          const isActive = pathname === item.href || (item.href !== '/dashboard' && pathname.startsWith(item.href) && item.href.length > 10)
-          const isDashActive = item.href === '/dashboard' && pathname === '/dashboard'
-          const active = isActive || isDashActive
+          const active =
+            item.href === '/dashboard'
+              ? pathname === item.href
+              : pathname === item.href || pathname.startsWith(`${item.href}/`)
 
           return (
             <Link key={item.href} href={item.href}>

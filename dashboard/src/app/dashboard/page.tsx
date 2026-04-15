@@ -18,10 +18,10 @@ const timeLabels = ['11:00','11:30','12:00','12:30','13:00','13:30','14:00','14:
 const latencyData = [120, 125, 118, 130, 142, 155, 160, 142, 148, 139, 135, 142]
 
 const recentEvents = [
-  { severity: 'red' as const,   label: 'CRITICAL', service: 'payment-service', desc: 'High error rate detected (5.2% → 18.7%)',          time: '2m ago'  },
-  { severity: 'amber' as const,  label: 'WARNING',  service: 'api-gateway',      desc: 'P95 latency spike (180ms → 450ms)',                 time: '14m ago' },
-  { severity: 'green' as const,  label: 'RESOLVED', service: 'auth-service',      desc: 'Memory leak patched by Executor Agent',            time: '38m ago' },
-  { severity: 'blue' as const,   label: 'INFO',     service: 'user-service',      desc: 'Auto-scaling triggered — added 4 replicas',        time: '52m ago' },
+  { id: 'evt-1', severity: 'red' as const,   label: 'CRITICAL', service: 'payment-service', desc: 'High error rate detected (5.2% → 18.7%)',          time: '2m ago'  },
+  { id: 'evt-2', severity: 'amber' as const,  label: 'WARNING',  service: 'api-gateway',      desc: 'P95 latency spike (180ms → 450ms)',                 time: '14m ago' },
+  { id: 'evt-3', severity: 'green' as const,  label: 'RESOLVED', service: 'auth-service',      desc: 'Memory leak patched by Executor Agent',            time: '38m ago' },
+  { id: 'evt-4', severity: 'blue' as const,   label: 'INFO',     service: 'user-service',      desc: 'Auto-scaling triggered — added 4 replicas',        time: '52m ago' },
 ]
 
 export default function DashboardPage() {
@@ -114,7 +114,7 @@ export default function DashboardPage() {
         <div className="flex flex-col gap-2">
           {recentEvents.map((e, i) => (
             <motion.div
-              key={i}
+              key={e.id}
               initial={{ opacity: 0, x: -10 }}
               animate={{ opacity: 1, x: 0 }}
               transition={{ delay: 0.4 + i * 0.05 }}
