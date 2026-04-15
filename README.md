@@ -2,6 +2,33 @@
 
 Welcome to your official HackToFuture 4 repository.
 
+## Kubernetes Quickstart (Lerna stack)
+
+Deploy order:
+
+1. Observation stack
+   - `kubectl apply -f observation-layer/k8s/namespace.yaml`
+   - `kubectl apply -f observation-layer/k8s/loki-configmap.yaml`
+   - `kubectl apply -f observation-layer/k8s/loki-deployment.yaml`
+   - `kubectl apply -f observation-layer/k8s/jaeger-deployment.yaml`
+   - `kubectl apply -f observation-layer/k8s/prometheus-configmap.yaml`
+   - `kubectl apply -f observation-layer/k8s/prometheus-deployment.yaml`
+   - `kubectl apply -f observation-layer/k8s/otel-collector-configmap.yaml`
+   - `kubectl apply -f observation-layer/k8s/otel-collector-rbac.yaml`
+   - `kubectl apply -f observation-layer/k8s/otel-collector-deployment.yaml`
+
+2. App namespaces and services
+   - `kubectl apply -f k8s/namespace-lerna.yaml`
+   - `kubectl apply -f backend/k8s/backend-rbac.yaml`
+   - `kubectl apply -f backend/k8s/backend-deployment.yaml`
+   - `kubectl apply -f dashboard/k8s/dashboard-deployment.yaml`
+   - `kubectl apply -f k8s/lerna-ingress.yaml`
+
+Notes:
+
+- Replace image placeholders in `backend/k8s/backend-deployment.yaml` and `dashboard/k8s/dashboard-deployment.yaml`.
+- Ingress routes `/api` to backend and `/` to dashboard, so frontend can access backend without CORS setup.
+
 This repository template will be used for development, tracking progress, and final submission of your project. Ensure that all work is committed here within the allowed hackathon duration.
 
 ---

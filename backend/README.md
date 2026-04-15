@@ -38,3 +38,12 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 
 - The Kubernetes poller auto-loads in-cluster config first, then kubeconfig.
 - If Kubernetes config is unavailable, cluster endpoints return `available: false` with a reason.
+
+## Kubernetes deployment
+
+Backend manifests are in `backend/k8s`:
+
+- `backend-rbac.yaml`
+- `backend-deployment.yaml`
+
+Before applying, replace `your-registry/lerna-backend:latest` with your image.

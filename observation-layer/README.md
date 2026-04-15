@@ -68,7 +68,13 @@ Use `otel-collector-k8s-config.yaml` when running in Kubernetes. This auto-adds 
 
 ```powershell
 kubectl create namespace observability
-kubectl -n observability create configmap otel-collector-config --from-file=otel-collector-k8s-config.yaml
+kubectl apply -f k8s/namespace.yaml
+kubectl apply -f k8s/loki-configmap.yaml
+kubectl apply -f k8s/loki-deployment.yaml
+kubectl apply -f k8s/jaeger-deployment.yaml
+kubectl apply -f k8s/prometheus-configmap.yaml
+kubectl apply -f k8s/prometheus-deployment.yaml
+kubectl apply -f k8s/otel-collector-configmap.yaml
 kubectl apply -f k8s/otel-collector-rbac.yaml
 kubectl apply -f k8s/otel-collector-deployment.yaml
 ```

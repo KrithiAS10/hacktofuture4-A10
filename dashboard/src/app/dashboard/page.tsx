@@ -1,9 +1,12 @@
 'use client'
 // src/app/dashboard/page.tsx
+import { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
 import { Activity, AlertTriangle, Server, Bot, CheckCircle } from 'lucide-react'
 import { Badge, PageHeader, StatCard } from '@/components/ui'
 import { SparklineChart } from '@/components/charts/SparklineChart'
+import { fetchClusterHealth, fetchClusterSummary } from '@/lib/observation-api'
+import { incidents as mockIncidents } from '@/lib/mock-data'
 
 const container = {
   hidden: {},
@@ -17,19 +20,66 @@ const item = {
 const timeLabels = ['11:00','11:30','12:00','12:30','13:00','13:30','14:00','14:30','14:45','15:00','15:15','15:30']
 const latencyData = [120, 125, 118, 130, 142, 155, 160, 142, 148, 139, 135, 142]
 
-const recentEvents = [
-  { id: 'evt-1', severity: 'red' as const,   label: 'CRITICAL', service: 'payment-service', desc: 'High error rate detected (5.2% → 18.7%)',          time: '2m ago'  },
-  { id: 'evt-2', severity: 'amber' as const,  label: 'WARNING',  service: 'api-gateway',      desc: 'P95 latency spike (180ms → 450ms)',                 time: '14m ago' },
-  { id: 'evt-3', severity: 'green' as const,  label: 'RESOLVED', service: 'auth-service',      desc: 'Memory leak patched by Executor Agent',            time: '38m ago' },
-  { id: 'evt-4', severity: 'blue' as const,   label: 'INFO',     service: 'user-service',      desc: 'Auto-scaling triggered — added 4 replicas',        time: '52m ago' },
+const recentEvents: UiEvent[] = [
+  { id: 'evt-1', severity: 'red' as const, label: 'CRITICAL', service: 'payment-service', desc: 'High error rate detected (5.2% → 18.7%)', time: '2m ago' },
+  { id: 'evt-2', severity: 'amber' as const, label: 'WARNING', service: 'api-gateway', desc: 'P95 latency spike (180ms → 450ms)', time: '14m ago' },
+  { id: 'evt-3', severity: 'green' as const, label: 'RESOLVED', service: 'auth-service', desc: 'Memory leak patched by Executor Agent', time: '38m ago' },
+  { id: 'evt-4', severity: 'blue' as const, label: 'INFO', service: 'user-service', desc: 'Auto-scaling triggered — added 4 replicas', time: '52m ago' },
 ]
 
+type UiEvent = {
+  id: string
+  severity: 'red' | 'amber' | 'green' | 'blue'
+  label: string
+  service: string
+  desc: string
+  time: string
+}
+
 export default function DashboardPage() {
+  const [loading, setLoading] = useState(true)
+  const [clusterHealth, setClusterHealth] = useState<any | null>(null)
+  const [clusterSummary, setClusterSummary] = useState<any | null>(null)
+
+  useEffect(() => {
+    let active = true
+    const load = async () => {
+      try {
+        const [health, summary] = await Promise.all([fetchClusterHealth(), fetchClusterSummary()])
+        if (!active) return
+        setClusterHealth(health)
+        setClusterSummary(summary)
+      } catch {
+        if (!active) return
+        setClusterHealth(null)
+        setClusterSummary(null)
+      } finally {
+        if (active) setLoading(false)
+      }
+    }
+    load()
+    const t = setInterval(load, 15000)
+    return () => {
+      active = false
+      clearInterval(t)
+    }
+  }, [])
+
+  const nodesReady = clusterHealth?.nodes?.ready ?? 0
+  const nodesTotal = clusterHealth?.nodes?.total ?? 0
+  const servicesTotal = clusterHealth?.services?.total ?? 0
+  const servicesDown = clusterHealth?.services?.without_ready_endpoints_count ?? 0
+  const score = clusterHealth?.score_hint ?? 0
+
   return (
     <div className="p-7 flex flex-col gap-6">
-      <PageHeader title="Command Center" subtitle="Real-time cluster telemetry · Last sync: just now">
-        <Badge variant="green">● HEALTHY</Badge>
-        <Badge variant="blue" className="text-[10px]">Thu Apr 09 · 14:32 UTC</Badge>
+      <PageHeader title="Command Center" subtitle="Real-time cluster telemetry">
+        <Badge variant={clusterHealth?.ok ? 'green' : 'red'}>
+          {loading ? '● LOADING' : clusterHealth?.ok ? '● HEALTHY' : '● DEGRADED'}
+        </Badge>
+        <Badge variant="blue" className="text-[10px]">
+          {clusterHealth?.last_updated ? new Date(clusterHealth.last_updated).toLocaleString() : 'No sync yet'}
+        </Badge>
       </PageHeader>
 
       {/* Stat Cards */}
@@ -40,9 +90,9 @@ export default function DashboardPage() {
         <motion.div variants={item}>
           <StatCard
             label="Cluster Health"
-            value="GOOD"
-            sub="32/32 nodes responsive"
-            valueColor="text-lerna-green"
+            value={clusterHealth?.ok ? 'GOOD' : 'CHECK'}
+            sub={`${nodesReady}/${nodesTotal} nodes ready · score ${score}`}
+            valueColor={clusterHealth?.ok ? 'text-lerna-green' : 'text-lerna-red'}
             glow="blue"
             icon={<Activity size={18} className="text-lerna-green" />}
             iconBg="bg-[rgba(16,185,129,0.1)]"
@@ -51,7 +101,7 @@ export default function DashboardPage() {
         <motion.div variants={item}>
           <StatCard
             label="Active Incidents"
-            value="3"
+            value={`${mockIncidents.filter((item) => item.status !== 'resolved').length}`}
             sub="1 critical · 2 warning"
             valueColor="text-lerna-red"
             icon={<AlertTriangle size={18} className="text-lerna-red" />}
@@ -61,9 +111,9 @@ export default function DashboardPage() {
         <motion.div variants={item}>
           <StatCard
             label="Services Running"
-            value="147"
-            sub="+3 since yesterday"
-            valueColor="text-lerna-blue2"
+            value={`${Math.max(0, servicesTotal - servicesDown)}/${servicesTotal}`}
+            sub={`${servicesDown} services without ready endpoints`}
+            valueColor={servicesDown === 0 ? 'text-lerna-blue2' : 'text-lerna-amber'}
             glow="blue"
             icon={<Server size={18} className="text-lerna-blue2" />}
             iconBg="bg-[rgba(59,130,246,0.1)]"
@@ -71,12 +121,12 @@ export default function DashboardPage() {
         </motion.div>
         <motion.div variants={item}>
           <StatCard
-            label="Agent Status"
-            value="5/5"
-            sub="All agents active"
-            valueColor="text-lerna-purple2"
+            label="Observation Status"
+            value={clusterSummary?.available ? 'LIVE' : 'DOWN'}
+            sub={clusterSummary?.available ? 'Poller connected to cluster' : (clusterSummary?.reason ?? 'Poller unavailable')}
+            valueColor={clusterSummary?.available ? 'text-lerna-purple2' : 'text-lerna-red'}
             glow="purple"
-            icon={<Bot size={18} className="text-lerna-purple2" />}
+            icon={clusterSummary?.available ? <Bot size={18} className="text-lerna-purple2" /> : <CheckCircle size={18} className="text-lerna-red" />}
             iconBg="bg-[rgba(168,85,247,0.1)]"
           />
         </motion.div>
@@ -89,19 +139,19 @@ export default function DashboardPage() {
       >
         <motion.div variants={item} className="bg-bg-2 border border-border rounded-2xl p-5 hover:border-border-2 transition-colors">
           <div className="text-[11px] font-semibold text-[#8A9BBB] font-mono mb-1">CPU Usage</div>
-          <div className="text-xl font-black text-lerna-blue2 mb-4">68.4%</div>
+          <div className="text-xl font-black text-lerna-blue2 mb-4">{Math.min(100, score)}%</div>
           <SparklineChart color="#3B82F6" gradientId="cpu" baseValue={65} height={100} showTooltip />
         </motion.div>
 
         <motion.div variants={item} className="bg-bg-2 border border-border rounded-2xl p-5 hover:border-border-2 transition-colors">
           <div className="text-[11px] font-semibold text-[#8A9BBB] font-mono mb-1">Memory Usage</div>
-          <div className="text-xl font-black text-lerna-purple2 mb-4">74.1%</div>
-          <SparklineChart color="#A855F7" gradientId="mem" baseValue={72} height={100} showTooltip />
+          <div className="text-xl font-black text-lerna-purple2 mb-4">{clusterSummary?.pods?.restarting_count ?? 0} restarting</div>
+          <SparklineChart color="#A855F7" gradientId="mem" baseValue={55} height={100} showTooltip />
         </motion.div>
 
         <motion.div variants={item} className="bg-bg-2 border border-border rounded-2xl p-5 hover:border-border-2 transition-colors">
           <div className="text-[11px] font-semibold text-[#8A9BBB] font-mono mb-1">Avg Latency</div>
-          <div className="text-xl font-black text-lerna-cyan mb-4">142ms</div>
+          <div className="text-xl font-black text-lerna-cyan mb-4">{clusterSummary?.pods?.non_running_count ?? 0} pods affected</div>
           <SparklineChart color="#06B6D4" gradientId="lat" data={latencyData} labels={timeLabels} height={100} showTooltip />
         </motion.div>
       </motion.div>

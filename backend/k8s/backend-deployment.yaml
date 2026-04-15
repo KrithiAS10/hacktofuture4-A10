@@ -1,0 +1,46 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: lerna-backend
+  namespace: lerna
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: lerna-backend
+  template:
+    metadata:
+      labels:
+        app: lerna-backend
+    spec:
+      serviceAccountName: lerna-backend
+      containers:
+        - name: backend
+          image: your-registry/lerna-backend:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8000
+          env:
+            - name: PROMETHEUS_URL
+              value: http://prometheus.observability.svc.cluster.local:9090
+            - name: LOKI_URL
+              value: http://loki.observability.svc.cluster.local:3100
+            - name: JAEGER_URL
+              value: http://jaeger.observability.svc.cluster.local:16686
+            - name: ENABLE_K8S_POLLER
+              value: "true"
+            - name: POLL_INTERVAL_SECONDS
+              value: "15"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: lerna-backend
+  namespace: lerna
+spec:
+  selector:
+    app: lerna-backend
+  ports:
+    - name: http
+      port: 8000
+      targetPort: 8000
