@@ -27,8 +27,7 @@ export function SparklineChart({
 }: SparklineProps) {
   const values = useMemo(
     () => data ?? generateTimeSeriesData(baseValue, 12, 10),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    []
+    [data, baseValue]
   )
 
   const chartData = values.map((v, i) => ({ v, label: labels?.[i] ?? `T-${values.length - i}` }))
