@@ -7,30 +7,30 @@ import { LayoutDashboard, AlertTriangle, Bot, MessageSquare } from 'lucide-react
 import clsx from 'clsx'
 
 const navItems = [
-  { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard, badge: null },
-  { href: '/incidents', label: 'Incidents', icon: AlertTriangle,   badge: '3'  },
-  { href: '/agents',   label: 'Agents',    icon: Bot,             badge: null },
-  { href: '/chat',     label: 'Chat Panel', icon: MessageSquare,   badge: null },
+  { href: '/dashboard', label: 'Overview', icon: LayoutDashboard, badge: null },
+  { href: '/incidents', label: 'Incidents', icon: AlertTriangle, badge: '3' },
+  { href: '/agents', label: 'Agents', icon: Bot, badge: null },
+  { href: '/chat', label: 'Chat', icon: MessageSquare, badge: null },
 ]
 
 export function Sidebar() {
   const pathname = usePathname()
 
   return (
-    <aside className="fixed left-0 top-0 w-[var(--sidebar-width)] h-screen bg-bg-2 border-r border-border flex flex-col z-50">
-      {/* Logo */}
-      <div className="px-5 py-5 border-b border-border flex items-center gap-3">
-        <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-lerna-blue to-lerna-purple flex items-center justify-center text-white font-black text-sm shadow-lg">
+    <aside className="fixed left-0 top-0 z-50 flex h-screen w-[var(--sidebar-width)] flex-col border-r border-border bg-[#0a0e18]/95 backdrop-blur-md">
+      <div className="flex items-center gap-3 border-b border-border px-5 py-6">
+        <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-gradient-to-br from-lerna-blue to-[#6366f1] text-sm font-bold text-white shadow-md shadow-lerna-blue/20">
           L
         </div>
-        <div>
-          <div className="gradient-text text-sm font-bold leading-tight">Project Lerna</div>
-          <div className="text-[9px] text-[#4A5B7A] font-mono tracking-widest mt-0.5">AUTONOMOUS SRE</div>
+        <div className="min-w-0">
+          <div className="font-display text-[15px] font-semibold tracking-tight text-white">Lerna</div>
+          <div className="mt-0.5 text-[10px] font-medium uppercase tracking-[0.14em] text-[#5c6d8c]">
+            Operations
+          </div>
         </div>
       </div>
 
-      {/* Nav */}
-      <nav className="flex-1 px-2 py-3 flex flex-col gap-0.5">
+      <nav className="flex flex-1 flex-col gap-0.5 px-3 py-4">
         {navItems.map((item) => {
           const Icon = item.icon
           const active =
@@ -39,20 +39,31 @@ export function Sidebar() {
               : pathname === item.href || pathname.startsWith(`${item.href}/`)
 
           return (
-            <Link key={item.href} href={item.href}>
+            <Link key={item.href} href={item.href} className="block rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-lerna-blue/50">
               <motion.div
-                whileHover={{ x: 2 }}
+                whileHover={{ x: 1 }}
+                transition={{ type: 'spring', stiffness: 400, damping: 28 }}
                 className={clsx(
-                  'flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-[13px] font-medium transition-all duration-150 border',
+                  'group relative flex items-center gap-3 rounded-lg px-3 py-2.5 text-[13px] font-medium transition-colors',
                   active
-                    ? 'bg-gradient-to-r from-[rgba(59,130,246,0.15)] to-[rgba(168,85,247,0.1)] text-white border-border-2'
-                    : 'text-[#8A9BBB] border-transparent hover:bg-bg-4 hover:text-white hover:border-border'
+                    ? 'bg-bg-4/80 text-white'
+                    : 'text-[#8a9bbb] hover:bg-bg-4/40 hover:text-white'
                 )}
               >
-                <Icon size={15} className="shrink-0 opacity-80" />
-                <span className="flex-1">{item.label}</span>
+                {active && (
+                  <span
+                    className="absolute left-0 top-1/2 h-5 w-0.5 -translate-y-1/2 rounded-full bg-lerna-blue shadow-[0_0_12px_rgba(59,130,246,0.6)]"
+                    aria-hidden
+                  />
+                )}
+                <Icon
+                  size={17}
+                  strokeWidth={active ? 2 : 1.75}
+                  className={clsx('shrink-0', active ? 'text-lerna-blue2' : 'text-[#6b7c9e] group-hover:text-[#9aaccc]')}
+                />
+                <span className="flex-1 truncate">{item.label}</span>
                 {item.badge && (
-                  <span className="bg-lerna-red text-white text-[10px] px-1.5 py-0.5 rounded-full font-mono leading-none">
+                  <span className="rounded-md bg-lerna-red/90 px-1.5 py-0.5 text-[10px] font-semibold tabular-nums text-white">
                     {item.badge}
                   </span>
                 )}
@@ -62,13 +73,15 @@ export function Sidebar() {
         })}
       </nav>
 
-      {/* Bottom status */}
-      <div className="px-3 py-4 border-t border-border">
-        <div className="flex items-center gap-2 text-xs text-[#8A9BBB]">
-          <span className="w-2 h-2 rounded-full bg-lerna-green shadow-[0_0_6px_#10B981]" />
-          All systems operational
+      <div className="border-t border-border px-4 py-4">
+        <div className="flex items-center gap-2 text-[12px] text-[#8a9bbb]">
+          <span className="relative flex h-2 w-2">
+            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-lerna-green opacity-40" />
+            <span className="relative inline-flex h-2 w-2 rounded-full bg-lerna-green" />
+          </span>
+          Connected
         </div>
-        <div className="text-[10px] text-[#4A5B7A] font-mono mt-1.5">v2.4.1 · prod-cluster-01</div>
+        <div className="mt-1.5 font-mono text-[10px] text-[#5c6d8c]">v2.4.1 · prod-cluster-01</div>
       </div>
     </aside>
   )

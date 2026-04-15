@@ -27,6 +27,8 @@ spec:
               value: http://loki.observability.svc.cluster.local:3100
             - name: JAEGER_URL
               value: http://jaeger.observability.svc.cluster.local:16686
+            - name: REDIS_URL
+              value: redis://redis.lerna.svc.cluster.local:6379/0
             - name: ENABLE_K8S_POLLER
               value: "true"
             - name: POLL_INTERVAL_SECONDS

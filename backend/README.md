@@ -9,6 +9,11 @@ This service provides the backend adapter between the dashboard and the observat
   - Loki (`/api/obs/logs`)
   - Jaeger (`/api/obs/traces`)
 - Backend health view (`/api/obs/health`)
+- Detection check (`/api/detection/check`) returning `has_error` + evidence summary
+- Agent prompt APIs (Redis-backed):
+  - `GET /api/agents/prompts`
+  - `PUT /api/agents/prompts/{agent_id}`
+  - `DELETE /api/agents/prompts/{agent_id}` (reset to built-in default in UI)
 - Kubernetes cluster poller for dashboard-friendly summaries:
   - `/api/cluster/summary`
   - `/api/cluster/health`
@@ -30,6 +35,7 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 - `PROMETHEUS_URL` (default: `http://localhost:9090`)
 - `LOKI_URL` (default: `http://localhost:3100`)
 - `JAEGER_URL` (default: `http://localhost:16686`)
+- `REDIS_URL` (default: `redis://localhost:6379/0`)
 - `ENABLE_K8S_POLLER` (default: `true`)
 - `K8S_NAMESPACE_SCOPE` (default: empty, meaning all namespaces)
 - `POLL_INTERVAL_SECONDS` (default: `15`)

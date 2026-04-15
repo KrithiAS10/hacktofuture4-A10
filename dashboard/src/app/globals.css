@@ -1,25 +1,27 @@
-@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Syne:wght@400;500;600;700;800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&family=JetBrains+Mono:wght@400;500;600&family=Syne:wght@600;700;800&display=swap');
 
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 :root {
-  --sidebar-width: 220px;
-  --bg: #080B14;
-  --bg2: #0D1120;
+  --sidebar-width: 240px;
+  --bg: #070a12;
+  --bg2: #0c101c;
   --bg3: #111827;
-  --bg4: #1A2236;
-  --border: #1E2D45;
-  --border2: #243352;
-  --blue: #3B82F6;
-  --blue2: #60A5FA;
-  --purple: #A855F7;
-  --purple2: #C084FC;
-  --green: #10B981;
-  --red: #EF4444;
-  --amber: #F59E0B;
-  --cyan: #06B6D4;
+  --bg4: #1a2234;
+  --border: #1e2a40;
+  --border2: #2a3a58;
+  --blue: #3b82f6;
+  --blue2: #60a5fa;
+  --purple: #a855f7;
+  --purple2: #c084fc;
+  --green: #10b981;
+  --red: #ef4444;
+  --amber: #f59e0b;
+  --cyan: #06b6d4;
+  --text-muted: #8a9bbb;
+  --text-faint: #5c6d8c;
 }
 
 * {
@@ -29,10 +31,35 @@
 html,
 body {
   background-color: var(--bg);
-  color: #E8EDF5;
-  font-family: 'Syne', sans-serif;
+  color: #e8edf5;
+  font-family: 'DM Sans', system-ui, sans-serif;
+  font-feature-settings: 'ss01' on, 'cv01' on;
   overflow-x: hidden;
   scroll-behavior: smooth;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Main app canvas: subtle grid + vignette */
+.app-canvas {
+  position: relative;
+  min-height: 100vh;
+}
+.app-canvas::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image:
+    linear-gradient(rgba(30, 42, 69, 0.35) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(30, 42, 69, 0.35) 1px, transparent 1px);
+  background-size: 56px 56px;
+  mask-image: radial-gradient(ellipse 85% 70% at 50% 0%, black 20%, transparent 72%);
+  opacity: 0.45;
+}
+.app-canvas > .app-canvas-inner {
+  position: relative;
+  z-index: 1;
 }
 
 /* Scrollbar */

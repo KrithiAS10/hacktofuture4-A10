@@ -6,12 +6,24 @@ from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Query
 
-from app.models import ClusterSummary, HealthResponse
+from app.models import (
+    AgentPromptEntry,
+    AgentPromptResetResponse,
+    AgentPromptsResponse,
+    AgentPromptUpdateRequest,
+    ClusterSummary,
+    DetectionCheckResponse,
+    HealthResponse,
+)
 from app.services.cluster_poller import ClusterPoller
+from app.services.detection import DetectionService
 from app.services.observability import ObservabilityService
+from app.services.prompt_store import PromptStoreService
 
 obs_service = ObservabilityService()
 cluster_poller = ClusterPoller(obs_service=obs_service)
+detection_service = DetectionService(obs_service)
+prompt_store = PromptStoreService()
 logger = logging.getLogger(__name__)
 
 
@@ -23,6 +35,7 @@ async def lifespan(_: FastAPI):
     finally:
         await cluster_poller.stop()
         await obs_service.close()
+        await prompt_store.close()
 
 
 app = FastAPI(title="Lerna Observation Backend", version="0.1.0", lifespan=lifespan)
@@ -100,3 +113,59 @@ async def get_cluster_health():
         "services": services,
         "last_updated": snapshot.get("last_updated"),
     }
+
+
+@app.get("/api/detection/check", response_model=DetectionCheckResponse)
+async def run_detection_check(
+    log_query: str = Query("{}", description="LogQL query used for detection scan"),
+    log_limit: int = Query(150, ge=10, le=1000),
+):
+    try:
+        snapshot = cluster_poller.get_snapshot()
+        return await detection_service.run_check(
+            cluster_snapshot=snapshot,
+            log_query=log_query,
+            log_limit=log_limit,
+        )
+    except Exception as exc:  # pylint: disable=broad-except
+        logger.exception("Detection check failed")
+        raise HTTPException(
+            status_code=502,
+            detail="Detection check failed due to an internal error.",
+        ) from exc
+
+
+@app.get("/api/agents/prompts", response_model=AgentPromptsResponse)
+async def get_agent_prompts(ids: Optional[str] = Query(None, description="Comma-separated agent IDs")):
+    try:
+        agent_ids = [item.strip() for item in ids.split(",")] if ids else []
+        agent_ids = [item for item in agent_ids if item]
+        prompts = await prompt_store.get_prompts(agent_ids if agent_ids else None)
+        return AgentPromptsResponse(
+            prompts=[AgentPromptEntry(agent_id=agent_id, prompt=prompt) for agent_id, prompt in prompts.items()]
+        )
+    except Exception as exc:  # pylint: disable=broad-except
+        raise HTTPException(status_code=502, detail=f"Failed to load prompts from Redis: {exc}") from exc
+
+
+@app.put("/api/agents/prompts/{agent_id}", response_model=AgentPromptEntry)
+async def update_agent_prompt(agent_id: str, payload: AgentPromptUpdateRequest):
+    try:
+        prompt = payload.prompt.strip()
+        if not prompt:
+            raise HTTPException(status_code=400, detail="Prompt cannot be empty")
+        await prompt_store.set_prompt(agent_id=agent_id, prompt=prompt)
+        return AgentPromptEntry(agent_id=agent_id, prompt=prompt)
+    except HTTPException:
+        raise
+    except Exception as exc:  # pylint: disable=broad-except
+        raise HTTPException(status_code=502, detail=f"Failed to save prompt to Redis: {exc}") from exc
+
+
+@app.delete("/api/agents/prompts/{agent_id}", response_model=AgentPromptResetResponse)
+async def reset_agent_prompt(agent_id: str):
+    try:
+        await prompt_store.delete_prompt(agent_id=agent_id)
+        return AgentPromptResetResponse(agent_id=agent_id, reset=True)
+    except Exception as exc:  # pylint: disable=broad-except
+        raise HTTPException(status_code=502, detail=f"Failed to reset prompt in Redis: {exc}") from exc

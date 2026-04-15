@@ -15,6 +15,7 @@ class Settings:
         self.prometheus_url = os.getenv("PROMETHEUS_URL", "http://localhost:9090").rstrip("/")
         self.loki_url = os.getenv("LOKI_URL", "http://localhost:3100").rstrip("/")
         self.jaeger_url = os.getenv("JAEGER_URL", "http://localhost:16686").rstrip("/")
+        self.redis_url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 
         self.enable_k8s_poller = _as_bool(os.getenv("ENABLE_K8S_POLLER", "True"), True)
         self.k8s_namespace_scope = os.getenv("K8S_NAMESPACE_SCOPE", "").strip()

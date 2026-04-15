@@ -1,9 +1,9 @@
 export const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, '') ?? '/api'
 
-async function request<T>(path: string): Promise<T> {
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const url = `${API_BASE_URL}${path}`
-  const response = await fetch(url, { cache: 'no-store' })
+  const response = await fetch(url, { cache: 'no-store', ...init })
   if (!response.ok) {
     throw new Error(`Request failed (${response.status}): ${url}`)
   }
@@ -73,6 +73,20 @@ export interface LokiQueryResponse {
   }
 }
 
+export interface AgentPromptEntry {
+  agent_id: string
+  prompt: string
+}
+
+export interface AgentPromptsResponse {
+  prompts: AgentPromptEntry[]
+}
+
+export interface AgentPromptResetResponse {
+  agent_id: string
+  reset: boolean
+}
+
 export async function fetchClusterHealth() {
   return request<ClusterHealthResponse>('/cluster/health')
 }
@@ -84,4 +98,23 @@ export async function fetchClusterSummary() {
 export async function fetchRecentLogs(limit = 100) {
   const query = encodeURIComponent('{}')
   return request<LokiQueryResponse>(`/obs/logs?query=${query}&limit=${limit}`)
+}
+
+export async function fetchAgentPrompts(agentIds?: string[]) {
+  const idsQuery = agentIds && agentIds.length > 0 ? `?ids=${encodeURIComponent(agentIds.join(','))}` : ''
+  return request<AgentPromptsResponse>(`/agents/prompts${idsQuery}`)
+}
+
+export async function updateAgentPrompt(agentId: string, prompt: string) {
+  return request<AgentPromptEntry>(`/agents/prompts/${encodeURIComponent(agentId)}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ prompt }),
+  })
+}
+
+export async function resetAgentPrompt(agentId: string) {
+  return request<AgentPromptResetResponse>(`/agents/prompts/${encodeURIComponent(agentId)}`, {
+    method: 'DELETE',
+  })
 }

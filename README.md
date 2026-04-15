@@ -19,6 +19,7 @@ Deploy order:
 
 2. App namespaces and services
    - `kubectl apply -f k8s/namespace-lerna.yaml`
+   - `kubectl apply -f k8s/redis-deployment.yaml`
    - `kubectl apply -f backend/k8s/backend-rbac.yaml`
    - `kubectl apply -f backend/k8s/backend-deployment.yaml`
    - `kubectl apply -f dashboard/k8s/dashboard-deployment.yaml`

@@ -20,6 +20,8 @@ spec:
           ports:
             - containerPort: 3000
           env:
+            - name: BACKEND_BASE_URL
+              value: http://lerna-backend:8000
             - name: HOSTNAME
               value: "0.0.0.0"
 ---
