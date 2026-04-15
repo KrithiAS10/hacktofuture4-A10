@@ -15,6 +15,17 @@ class HealthResponse(BaseModel):
     overall_ok: bool
 
 
+class ClusterMetrics(BaseModel):
+    cpu_percentage: Optional[float] = None
+    memory_percentage: Optional[float] = None
+    cpu_available: bool = False
+    memory_available: bool = False
+    cpu_query: Optional[str] = None
+    memory_query: Optional[str] = None
+    cpu_reason: Optional[str] = None
+    memory_reason: Optional[str] = None
+
+
 class ClusterSummary(BaseModel):
     available: bool
     last_updated: Optional[str] = None
@@ -25,3 +36,4 @@ class ClusterSummary(BaseModel):
     services: Dict[str, Any] = {}
     pods: Dict[str, Any] = {}
     recent_events: List[Dict[str, Any]] = []
+    metrics: ClusterMetrics = ClusterMetrics()

@@ -3,16 +3,20 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from kubernetes import client, config
 from app.config import settings
 
 logger = logging.getLogger(__name__)
 
+if TYPE_CHECKING:
+    from app.services.observability import ObservabilityService
+
 
 class ClusterPoller:
-    def __init__(self) -> None:
+    def __init__(self, obs_service: "ObservabilityService") -> None:
+        self._obs_service = obs_service
         self._task: Optional[asyncio.Task] = None
         self._ready = False
         self._core: Optional[client.CoreV1Api] = None
@@ -21,6 +25,14 @@ class ClusterPoller:
             "available": False,
             "reason": "poller_not_started",
             "namespace_scope": settings.k8s_namespace_scope or None,
+            "metrics": {
+                "cpu_percentage": None,
+                "memory_percentage": None,
+                "cpu_available": False,
+                "memory_available": False,
+                "cpu_reason": "poller_not_started",
+                "memory_reason": "poller_not_started",
+            },
         }
 
     async def start(self) -> None:
@@ -80,6 +92,10 @@ class ClusterPoller:
                 ),
                 timeout=settings.poll_timeout_seconds,
             )
+
+            # Fetch metrics from Prometheus (non-blocking, best-effort)
+            metrics = await self._fetch_metrics()
+
             self._snapshot = {
                 "available": True,
                 "last_updated": datetime.now(tz=timezone.utc).isoformat(),
@@ -89,6 +105,7 @@ class ClusterPoller:
                 "services": self._summarize_services(services, endpoints),
                 "pods": self._summarize_pods(pods),
                 "recent_events": self._summarize_events(events),
+                "metrics": metrics,
             }
         except Exception as exc:  # pylint: disable=broad-except
             logger.exception("Cluster poller failed to refresh snapshot")
@@ -253,4 +270,85 @@ class ClusterPoller:
                     ),
                 }
             )
+        summary.sort(key=lambda item: item["last_timestamp"] or "", reverse=True)
         return summary[:50]
+
+    async def _fetch_metrics(self) -> Dict[str, Any]:
+        """Fetch basic cluster-level metrics from Prometheus."""
+        metrics: Dict[str, Any] = {
+            "cpu_percentage": None,
+            "memory_percentage": None,
+            "cpu_available": False,
+            "memory_available": False,
+            "cpu_query": None,
+            "memory_query": None,
+            "cpu_reason": "metric_not_found",
+            "memory_reason": "metric_not_found",
+        }
+        try:
+            cpu_queries = [
+                'avg(k8s_node_cpu_utilization_ratio) * 100',
+                'avg(k8s_node_cpu_utilization) * 100',
+            ]
+            mem_queries = [
+                'sum(k8s_node_memory_usage_bytes) / (sum(k8s_node_memory_usage_bytes) + sum(k8s_node_memory_available_bytes)) * 100',
+                'sum(k8s_node_memory_usage) / (sum(k8s_node_memory_usage) + sum(k8s_node_memory_available)) * 100',
+            ]
+
+            async def resolve_metric(queries: List[str], label: str) -> Dict[str, Any]:
+                last_reason = "metric_not_found"
+                for query in queries:
+                    try:
+                        response = await self._obs_service.query_metrics(query)
+                    except Exception as exc:  # pylint: disable=broad-except
+                        last_reason = f"query_failed: {exc}"
+                        logger.warning("Prometheus %s query failed", label, extra={"query": query}, exc_info=True)
+                        continue
+
+                    results = response.get("data", {}).get("result", [])
+                    if not results:
+                        last_reason = "query_returned_no_series"
+                        continue
+
+                    raw_value = results[0].get("value", [None, None])[1]
+                    if raw_value is None:
+                        last_reason = "query_returned_no_value"
+                        continue
+
+                    try:
+                        return {
+                            "percentage": round(float(raw_value), 2),
+                            "available": True,
+                            "query": query,
+                            "reason": None,
+                        }
+                    except (TypeError, ValueError):
+                        last_reason = f"query_returned_non_numeric_value: {raw_value}"
+
+                return {
+                    "percentage": None,
+                    "available": False,
+                    "query": queries[0] if queries else None,
+                    "reason": last_reason,
+                }
+
+            cpu_metric, memory_metric = await asyncio.gather(
+                resolve_metric(cpu_queries, "cpu"),
+                resolve_metric(mem_queries, "memory"),
+            )
+
+            metrics["cpu_percentage"] = cpu_metric["percentage"]
+            metrics["cpu_available"] = cpu_metric["available"]
+            metrics["cpu_query"] = cpu_metric["query"]
+            metrics["cpu_reason"] = cpu_metric["reason"]
+
+            metrics["memory_percentage"] = memory_metric["percentage"]
+            metrics["memory_available"] = memory_metric["available"]
+            metrics["memory_query"] = memory_metric["query"]
+            metrics["memory_reason"] = memory_metric["reason"]
+        except Exception:  # pylint: disable=broad-except
+            logger.warning("Failed to fetch metrics from Prometheus, skipping", exc_info=True)
+            metrics["cpu_reason"] = "metrics_fetch_failed"
+            metrics["memory_reason"] = "metrics_fetch_failed"
+
+        return metrics

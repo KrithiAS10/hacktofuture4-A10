@@ -10,7 +10,7 @@ metadata:
   name: otel-collector-k8sattributes
 rules:
   - apiGroups: [""]
-    resources: ["pods", "namespaces", "nodes", "events"]
+    resources: ["pods", "namespaces", "nodes", "events", "nodes/stats", "nodes/proxy", "nodes/metrics", "nodes/spec"]
     verbs: ["get", "list", "watch"]
   - apiGroups: ["apps"]
     resources: ["replicasets", "deployments"]
