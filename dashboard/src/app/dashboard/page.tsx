@@ -5,7 +5,12 @@ import { motion } from 'framer-motion'
 import { Activity, AlertTriangle, Server, Bot, CheckCircle } from 'lucide-react'
 import { Badge, PageHeader, StatCard } from '@/components/ui'
 import { SparklineChart } from '@/components/charts/SparklineChart'
-import { fetchClusterHealth, fetchClusterSummary } from '@/lib/observation-api'
+import {
+  fetchClusterHealth,
+  fetchClusterSummary,
+  type ClusterHealthResponse,
+  type ClusterSummaryResponse,
+} from '@/lib/observation-api'
 import { incidents as mockIncidents } from '@/lib/mock-data'
 
 const container = {
@@ -38,8 +43,8 @@ type UiEvent = {
 
 export default function DashboardPage() {
   const [loading, setLoading] = useState(true)
-  const [clusterHealth, setClusterHealth] = useState<any | null>(null)
-  const [clusterSummary, setClusterSummary] = useState<any | null>(null)
+  const [clusterHealth, setClusterHealth] = useState<ClusterHealthResponse | null>(null)
+  const [clusterSummary, setClusterSummary] = useState<ClusterSummaryResponse | null>(null)
 
   useEffect(() => {
     let active = true
@@ -138,19 +143,19 @@ export default function DashboardPage() {
         className="grid grid-cols-1 md:grid-cols-3 gap-4"
       >
         <motion.div variants={item} className="bg-bg-2 border border-border rounded-2xl p-5 hover:border-border-2 transition-colors">
-          <div className="text-[11px] font-semibold text-[#8A9BBB] font-mono mb-1">CPU Usage</div>
+          <div className="text-[11px] font-semibold text-[#8A9BBB] font-mono mb-1">Health Score</div>
           <div className="text-xl font-black text-lerna-blue2 mb-4">{Math.min(100, score)}%</div>
           <SparklineChart color="#3B82F6" gradientId="cpu" baseValue={65} height={100} showTooltip />
         </motion.div>
 
         <motion.div variants={item} className="bg-bg-2 border border-border rounded-2xl p-5 hover:border-border-2 transition-colors">
-          <div className="text-[11px] font-semibold text-[#8A9BBB] font-mono mb-1">Memory Usage</div>
+          <div className="text-[11px] font-semibold text-[#8A9BBB] font-mono mb-1">Restarting Pods</div>
           <div className="text-xl font-black text-lerna-purple2 mb-4">{clusterSummary?.pods?.restarting_count ?? 0} restarting</div>
           <SparklineChart color="#A855F7" gradientId="mem" baseValue={55} height={100} showTooltip />
         </motion.div>
 
         <motion.div variants={item} className="bg-bg-2 border border-border rounded-2xl p-5 hover:border-border-2 transition-colors">
-          <div className="text-[11px] font-semibold text-[#8A9BBB] font-mono mb-1">Avg Latency</div>
+          <div className="text-[11px] font-semibold text-[#8A9BBB] font-mono mb-1">Non-running Pods</div>
           <div className="text-xl font-black text-lerna-cyan mb-4">{clusterSummary?.pods?.non_running_count ?? 0} pods affected</div>
           <SparklineChart color="#06B6D4" gradientId="lat" data={latencyData} labels={timeLabels} height={100} showTooltip />
         </motion.div>
