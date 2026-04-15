@@ -1,0 +1,74 @@
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 256
+  batch:
+    timeout: 1s
+    send_batch_size: 1024
+  resourcedetection:
+    detectors: [env, system]
+    timeout: 2s
+    override: false
+  resource:
+    attributes:
+      - key: service.name
+        action: insert
+        value: unknown-service
+      - key: service.namespace
+        action: insert
+        value: lerna
+      - key: deployment.environment
+        action: upsert
+        value: local
+      - key: telemetry.layer
+        action: insert
+        value: observation-layer
+  resource/canonical:
+    attributes:
+      - key: lerna.source.service
+        from_attribute: service.name
+        action: upsert
+      - key: lerna.source.namespace
+        from_attribute: service.namespace
+        action: upsert
+      - key: lerna.source.environment
+        from_attribute: deployment.environment
+        action: upsert
+      - key: lerna.telemetry.signal_owner
+        from_attribute: telemetry.layer
+        action: upsert
+
+exporters:
+  debug:
+    verbosity: basic
+  prometheus:
+    endpoint: 0.0.0.0:8889
+  loki:
+    endpoint: http://loki:3100/loki/api/v1/push
+  otlp/jaeger:
+    endpoint: jaeger:4317
+    tls:
+      insecure: true
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, resourcedetection, resource, resource/canonical, batch]
+      exporters: [otlp/jaeger, debug]
+    metrics:
+      receivers: [otlp]
+      processors: [memory_limiter, resourcedetection, resource, resource/canonical, batch]
+      exporters: [prometheus, debug]
+    logs:
+      receivers: [otlp]
+      processors: [memory_limiter, resourcedetection, resource, resource/canonical, batch]
+      exporters: [loki, debug]

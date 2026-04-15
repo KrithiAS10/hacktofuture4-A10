@@ -1,0 +1,48 @@
+version: v1
+description: Canonical telemetry envelope used by Lerna detection and diagnosis layers.
+
+required_fields:
+  - lerna.source.service
+  - lerna.source.environment
+  - telemetry.layer
+  - timestamp
+  - signal.type
+
+field_definitions:
+  lerna.source.service:
+    type: string
+    description: Canonical service identity.
+    source_priority:
+      - service.name
+      - k8s.deployment.name
+      - unknown-service
+  lerna.source.namespace:
+    type: string
+    description: Canonical namespace or service grouping.
+    source_priority:
+      - k8s.namespace.name
+      - service.namespace
+  lerna.source.pod:
+    type: string
+    description: Pod identity (k8s only).
+    source_priority:
+      - k8s.pod.name
+  lerna.source.environment:
+    type: string
+    description: Runtime environment for policy and routing decisions.
+    source_priority:
+      - deployment.environment
+      - env
+      - local
+  lerna.telemetry.signal_owner:
+    type: string
+    description: Telemetry layer source.
+    source_priority:
+      - telemetry.layer
+  signal.type:
+    type: enum
+    values: [log, metric, trace, event]
+    description: Unified signal category for downstream agents.
+  timestamp:
+    type: rfc3339
+    description: Event or sample timestamp.
