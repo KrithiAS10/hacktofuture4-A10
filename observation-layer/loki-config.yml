@@ -35,6 +35,7 @@ compactor:
   working_directory: /loki/retention
   compaction_interval: 10m
   retention_enabled: true
+  delete_request_store: filesystem
 
 analytics:
   reporting_enabled: false

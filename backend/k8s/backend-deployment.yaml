@@ -16,8 +16,8 @@ spec:
       serviceAccountName: lerna-backend
       containers:
         - name: backend
-          image: your-registry/lerna-backend:latest
-          imagePullPolicy: IfNotPresent
+          image: lerna-backend:latest
+          imagePullPolicy: Never
           ports:
             - containerPort: 8000
           env:
