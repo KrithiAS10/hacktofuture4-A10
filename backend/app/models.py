@@ -1,5 +1,6 @@
 from typing import Any, Dict, List, Optional
 from pydantic import BaseModel
+from lerna_shared.detection import DetectionCheckResponse, DetectionEvidence
 
 
 class BackendStatus(BaseModel):
@@ -39,22 +40,6 @@ class ClusterSummary(BaseModel):
     metrics: ClusterMetrics = ClusterMetrics()
 
 
-class DetectionEvidence(BaseModel):
-    signal_type: str
-    source: str
-    severity: str
-    message: str
-    timestamp: Optional[str] = None
-
-
-class DetectionCheckResponse(BaseModel):
-    has_error: bool
-    message: str
-    checked_at: str
-    summary: Dict[str, int]
-    evidence: List[DetectionEvidence]
-
-
 class AgentPromptUpdateRequest(BaseModel):
     prompt: str
 
@@ -71,3 +56,43 @@ class AgentPromptsResponse(BaseModel):
 class AgentPromptResetResponse(BaseModel):
     agent_id: str
     reset: bool
+
+
+class AgentWorkflowResponse(BaseModel):
+    workflow_id: str
+    incident_id: str
+    cost: Optional[float] = None
+    status: str
+    accepted_at: str
+    current_stage: Optional[str] = None
+    started_at: Optional[str] = None
+    finished_at: Optional[str] = None
+    # Agent runtimes may store `result` as either a structured dict (success)
+    # or a stringified exception message (failure).
+    result: Optional[Any] = None
+
+
+class AgentWorkflowListResponse(BaseModel):
+    workflows: List[AgentWorkflowResponse]
+
+
+class AgentCostSettingsUpdateRequest(BaseModel):
+    max_daily_cost: float
+
+
+class AgentCostSettingsResponse(BaseModel):
+    max_daily_cost: Optional[float] = None
+    spent_today: float
+    remaining_today: Optional[float] = None
+
+
+class OrchestratorChatRequest(BaseModel):
+    message: str
+    workflow_id: Optional[str] = None
+    incident_id: Optional[str] = None
+    messages: List[Dict[str, Any]] = []
+
+
+class OrchestratorChatResponse(BaseModel):
+    message: str
+    workflow_id: Optional[str] = None

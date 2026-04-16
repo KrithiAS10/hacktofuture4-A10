@@ -1,0 +1,27 @@
+# Never bake local secrets into images (agents/backend builds use repo root as context).
+.env
+**/.env
+
+# Git and local editor state
+.git
+.git/**
+.cursor
+.cursor/**
+.vscode
+.vscode/**
+
+# Python caches and local virtual envs
+**/__pycache__/
+**/*.pyc
+**/.pytest_cache/
+agents-layer/venv/
+backend/venv/
+detection-service/venv/
+
+# Frontend build artifacts (not needed for Python image builds from repo root)
+dashboard/node_modules/
+dashboard/.next/
+
+# Local terminal/transcript artifacts
+agent-transcripts/
+mcps/

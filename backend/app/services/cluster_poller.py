@@ -9,6 +9,7 @@ from kubernetes import client, config
 from app.config import settings
 
 logger = logging.getLogger(__name__)
+EXCLUDED_SERVICE_NAMESPACES = {"lerna"}
 
 if TYPE_CHECKING:
     from app.services.observability import ObservabilityService
@@ -186,14 +187,21 @@ class ClusterPoller:
     def _summarize_services(services, endpoints) -> Dict[str, Any]:
         endpoint_map: Dict[str, int] = {}
         for ep in endpoints:
+            if ep.metadata.namespace in EXCLUDED_SERVICE_NAMESPACES:
+                continue
             key = f"{ep.metadata.namespace}/{ep.metadata.name}"
             ready = 0
             for subset in ep.subsets or []:
                 ready += len(subset.addresses or [])
             endpoint_map[key] = ready
 
+        counted_services = [
+            svc
+            for svc in services
+            if svc.metadata.namespace not in EXCLUDED_SERVICE_NAMESPACES
+        ]
         without_ready: List[Dict[str, Any]] = []
-        for svc in services:
+        for svc in counted_services:
             if svc.spec.type == "ExternalName":
                 continue
             key = f"{svc.metadata.namespace}/{svc.metadata.name}"
@@ -206,7 +214,7 @@ class ClusterPoller:
                     }
                 )
         return {
-            "total": len(services),
+            "total": len(counted_services),
             "without_ready_endpoints_count": len(without_ready),
             "without_ready_endpoints": without_ready[:30],
         }

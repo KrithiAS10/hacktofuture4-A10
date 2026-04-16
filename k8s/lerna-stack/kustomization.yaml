@@ -1,0 +1,24 @@
+# Apply with:
+#   kubectl kustomize k8s/lerna-stack --load-restrictor=LoadRestrictionsNone | kubectl apply -f -
+# Paths under backend/, dashboard/, etc. require LoadRestrictionsNone (kubectl 1.21+).
+# Namespace is rewritten by deploy-kind scripts when LERNA_NAMESPACE is set.
+# Note: ClusterRoleBinding lerna-backend-cluster-read is cluster-scoped; only one
+# active binding name per cluster — use one Lerna app namespace per cluster, or
+# delete/adjust that binding before installing into another namespace.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: lerna
+
+resources:
+  - ../redis-deployment.yaml
+  - ../qdrant-deployment.yaml
+  - ../../backend/k8s/backend-rbac.yaml
+  - ../../backend/k8s/backend-deployment.yaml
+  - ../../dashboard/k8s/dashboard-deployment.yaml
+  - ../../agents-layer/k8s/agents-deployment.yaml
+  - ../../detection-service/k8s/detection-deployment.yaml
+  - ../lerna-ingress.yaml
+
+
+

@@ -3,7 +3,7 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { motion } from 'framer-motion'
-import { LayoutDashboard, AlertTriangle, Bot, MessageSquare } from 'lucide-react'
+import { LayoutDashboard, AlertTriangle, Bot, MessageSquare, Settings } from 'lucide-react'
 import clsx from 'clsx'
 
 const navItems = [
@@ -11,6 +11,7 @@ const navItems = [
   { href: '/incidents', label: 'Incidents', icon: AlertTriangle, badge: '3' },
   { href: '/agents', label: 'Agents', icon: Bot, badge: null },
   { href: '/chat', label: 'Chat', icon: MessageSquare, badge: null },
+  { href: '/settings', label: 'Settings', icon: Settings, badge: null },
 ]
 
 export function Sidebar() {

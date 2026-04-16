@@ -1,0 +1,61 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: lerna-agents
+  namespace: lerna
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: lerna-agents
+  template:
+    metadata:
+      labels:
+        app: lerna-agents
+    spec:
+      # Same SA as backend/detection: ClusterRole lerna-backend-cluster-read (pods, events, etc.)
+      serviceAccountName: lerna-backend
+      containers:
+        - name: agents
+          image: lerna-agents:latest
+          imagePullPolicy: Never
+          ports:
+            - containerPort: 8000
+          # Create once: kubectl create secret generic lerna-agents-secrets -n lerna --from-env-file=path/to/.env
+          # (same keys as agents-layer/.env, e.g. OPENROUTER_API_KEY). optional: true keeps pod up if secret missing.
+          envFrom:
+            - secretRef:
+                name: lerna-agents-secrets
+                optional: true
+          env:
+            - name: LERNA_WORKFLOW_ENGINE
+              value: langgraph
+            - name: TESTAPP_NAMESPACE
+              value: default
+            - name: OTEL_COLLECTOR_ENDPOINT
+              value: http://otel-collector.observability.svc.cluster.local:4318
+            - name: OTEL_COLLECTOR_PROTOCOL
+              value: http/protobuf
+            - name: PROMETHEUS_URL
+              value: http://prometheus.observability.svc.cluster.local:9090
+            - name: LOKI_URL
+              value: http://loki.observability.svc.cluster.local:3100
+            - name: JAEGER_URL
+              value: http://jaeger.observability.svc.cluster.local:16686
+            - name: REDIS_URL
+              value: redis://redis:6379/0
+            - name: QDRANT_URL
+              value: http://qdrant:6333
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: lerna-agents
+  namespace: lerna
+spec:
+  selector:
+    app: lerna-agents
+  ports:
+    - name: http
+      port: 8000
+      targetPort: 8000

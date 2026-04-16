@@ -68,6 +68,7 @@ export default function IncidentsPage() {
 
                   <div className="text-right shrink-0">
                     <div className="text-[11px] text-[#4A5B7A] font-mono">{inc.timestamp}</div>
+                    <div className="text-[11px] text-[#8A9BBB] font-mono mt-1">${inc.cost.toFixed(2)} cost</div>
                     <div className="text-[10px] text-[#4A5B7A] font-mono mt-1.5">{inc.id}</div>
                     {!isResolved && (
                       <div className="text-[11px] text-lerna-blue2 font-mono mt-2 flex items-center gap-1 justify-end">

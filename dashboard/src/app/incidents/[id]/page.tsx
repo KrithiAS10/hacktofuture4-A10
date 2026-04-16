@@ -3,9 +3,11 @@
 import { motion } from 'framer-motion'
 import { ArrowLeft, Play, FlaskConical, AlertOctagon, Brain } from 'lucide-react'
 import Link from 'next/link'
+import { useMemo } from 'react'
+import { useParams } from 'next/navigation'
 import { Badge, Button, PageHeader } from '@/components/ui'
 import { SparklineChart } from '@/components/charts/SparklineChart'
-import { incidentLogs } from '@/lib/mock-data'
+import { incidentLogs, incidents } from '@/lib/mock-data'
 import clsx from 'clsx'
 
 const errorRateData = [2.1, 2.3, 4.8, 9.2, 18.7, 18.1, 17.9, 18.3, 17.6, 17.8, 18.0, 17.5]
@@ -23,6 +25,12 @@ const logLevelStyle: Record<string, string> = {
 }
 
 export default function IncidentDetailPage() {
+  const params = useParams<{ id: string }>()
+  const incident = useMemo(
+    () => incidents.find((item) => item.id === params?.id) ?? incidents[0],
+    [params?.id]
+  )
+
   return (
     <div className="p-7 flex flex-col gap-6">
       {/* Back + Header */}
@@ -35,9 +43,10 @@ export default function IncidentDetailPage() {
             <ArrowLeft size={12} /> Back to Incidents
           </motion.div>
         </Link>
-        <PageHeader title="High Error Rate Detected" subtitle="INC-2024-0891 · payment-service">
-          <Badge variant="red">P1 CRITICAL</Badge>
-          <Badge variant="amber">ACTIVE · 2m</Badge>
+        <PageHeader title={incident.title} subtitle={`${incident.id} · ${incident.service}`}>
+          <Badge variant="red">{incident.priority} {incident.severity.toUpperCase()}</Badge>
+          <Badge variant="amber">{incident.status.toUpperCase()} · {incident.timestamp}</Badge>
+          <Badge variant="blue">${incident.cost.toFixed(2)} COST</Badge>
         </PageHeader>
       </div>
 

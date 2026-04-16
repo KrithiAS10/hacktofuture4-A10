@@ -1,6 +1,6 @@
 # Observation Backend (FastAPI)
 
-This service provides the backend adapter between the dashboard and the observation stack.
+This service provides the operator/dashboard backend adapter between the dashboard and the observation stack.
 
 ## Features
 
@@ -9,7 +9,7 @@ This service provides the backend adapter between the dashboard and the observat
   - Loki (`/api/obs/logs`)
   - Jaeger (`/api/obs/traces`)
 - Backend health view (`/api/obs/health`)
-- Detection check (`/api/detection/check`) returning `has_error` + evidence summary
+- Detection debug check (`/api/detection/check`) returning `has_error` + evidence summary
 - Agent prompt APIs (Redis-backed):
   - `GET /api/agents/prompts`
   - `PUT /api/agents/prompts/{agent_id}`
@@ -17,6 +17,7 @@ This service provides the backend adapter between the dashboard and the observat
 - Kubernetes cluster poller for dashboard-friendly summaries:
   - `/api/cluster/summary`
   - `/api/cluster/health`
+- Autonomous incident polling/triggering now lives in the standalone `detection-service`
 
 ## Run locally
 
@@ -40,6 +41,15 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 - `K8S_NAMESPACE_SCOPE` (default: empty, meaning all namespaces)
 - `POLL_INTERVAL_SECONDS` (default: `15`)
 - `POLL_TIMEOUT_SECONDS` (default: `20`)
+
+### Local development notes
+
+- When running `dashboard` locally with the backend on `http://localhost:8000`, set `NEXT_PUBLIC_API_BASE_URL=http://localhost:8000/api`.
+- When using a local backend with a cluster-deployed agents service, port-forward the agents service and set `AGENTS_SERVICE_URL=http://localhost:8001`.
+  ```powershell
+  kubectl port-forward -n lerna service/lerna-agents 8001:8000
+  ```
+- If running the backend inside Kubernetes, keep the default `'/api'` path or configure an ingress proxy.
 
 ## Notes
 

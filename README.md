@@ -4,6 +4,26 @@ Welcome to your official HackToFuture 4 repository.
 
 ## Kubernetes Quickstart (Lerna stack)
 
+### Local cluster with kind (recommended)
+
+Prerequisites: [Docker](https://docs.docker.com/get-docker/), [kind](https://kind.sigs.k8s.io/docs/user/quick-start/#installation), [kubectl](https://kubernetes.io/docs/tasks/tools/).
+
+From the repository root:
+
+- **Windows (PowerShell):** `.\scripts\deploy-kind.ps1`
+- **Linux / macOS:** `chmod +x scripts/deploy-kind.sh && ./scripts/deploy-kind.sh`
+
+This creates a cluster named `lerna` (override with `KIND_CLUSTER_NAME`), installs ingress-nginx for kind, builds `lerna-backend:latest` and `lerna-dashboard:latest`, loads them into the cluster (`imagePullPolicy: Never`), applies the observation stack and app manifests, and waits for rollouts.
+
+After a successful run:
+
+- Open **http://localhost:8080** (ingress maps host port **8080** to the controller; see `kind/cluster-config.yaml`).
+- Optional: add `127.0.0.1 lerna.local` to your hosts file and use **http://lerna.local:8080**.
+
+To tear down: `kind delete cluster --name lerna`
+
+### Manual `kubectl apply` (any cluster)
+
 Deploy order:
 
 1. Observation stack
@@ -21,14 +41,16 @@ Deploy order:
    - `kubectl apply -f k8s/namespace-lerna.yaml`
    - `kubectl apply -f k8s/redis-deployment.yaml`
    - `kubectl apply -f backend/k8s/backend-rbac.yaml`
+   - `kubectl apply -f agents-layer/k8s/agents-deployment.yaml`
+   - `kubectl apply -f detection-service/k8s/detection-deployment.yaml`
    - `kubectl apply -f backend/k8s/backend-deployment.yaml`
    - `kubectl apply -f dashboard/k8s/dashboard-deployment.yaml`
    - `kubectl apply -f k8s/lerna-ingress.yaml`
 
 Notes:
 
-- Replace image placeholders in `backend/k8s/backend-deployment.yaml` and `dashboard/k8s/dashboard-deployment.yaml`.
-- Ingress routes `/api` to backend and `/` to dashboard, so frontend can access backend without CORS setup.
+- **Images:** For local kind, use the scripted deploy above so images are built and loaded into the cluster. Manifests reference tags such as `lerna-backend:latest`, `lerna-agents:latest`, `lerna-detection:latest`, and `lerna-dashboard:latest` with `imagePullPolicy: Never`. On other clusters, replace image names in `backend/k8s/backend-deployment.yaml`, `agents-layer/k8s/agents-deployment.yaml`, `detection-service/k8s/detection-deployment.yaml`, and `dashboard/k8s/dashboard-deployment.yaml`, push those images to your registry, and set `imagePullPolicy` and tags as needed.
+- **Ingress:** Routes `/api` to the backend and `/` to the dashboard (`ingressClassName: nginx`), so the frontend can reach the API without extra CORS setup. For kind, hosts **localhost** and **lerna.local** are defined in `k8s/lerna-ingress.yaml`.
 
 This repository template will be used for development, tracking progress, and final submission of your project. Ensure that all work is committed here within the allowed hackathon duration.
 

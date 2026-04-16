@@ -2,19 +2,28 @@ from __future__ import annotations
 
 import logging
 from contextlib import asynccontextmanager
-from typing import Optional
+from typing import Any, Optional
 
+import httpx
 from fastapi import FastAPI, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
 
 from app.models import (
+    AgentCostSettingsResponse,
+    AgentCostSettingsUpdateRequest,
     AgentPromptEntry,
     AgentPromptResetResponse,
     AgentPromptsResponse,
     AgentPromptUpdateRequest,
+    AgentWorkflowListResponse,
+    AgentWorkflowResponse,
+    OrchestratorChatRequest,
+    OrchestratorChatResponse,
     ClusterSummary,
     DetectionCheckResponse,
     HealthResponse,
 )
+from app.services.agents_service import AgentsService
 from app.services.cluster_poller import ClusterPoller
 from app.services.detection import DetectionService
 from app.services.observability import ObservabilityService
@@ -24,7 +33,31 @@ obs_service = ObservabilityService()
 cluster_poller = ClusterPoller(obs_service=obs_service)
 detection_service = DetectionService(obs_service)
 prompt_store = PromptStoreService()
+agents_service = AgentsService()
 logger = logging.getLogger(__name__)
+
+
+def _upstream_error_detail(body: Any, fallback: str) -> str:
+    """FastAPI may return `detail` as str, list of validation dicts, or nested objects."""
+    if not isinstance(body, dict):
+        return fallback
+    detail = body.get("detail")
+    if detail is None:
+        msg = body.get("message")
+        return str(msg) if msg is not None else fallback
+    if isinstance(detail, str):
+        return detail
+    if isinstance(detail, list):
+        parts: list[str] = []
+        for item in detail:
+            if isinstance(item, dict):
+                loc = item.get("loc")
+                msg = item.get("msg", item)
+                parts.append(f"{loc}: {msg}" if loc else str(msg))
+            else:
+                parts.append(str(item))
+        return "; ".join(parts) if parts else fallback
+    return str(detail)
 
 
 @asynccontextmanager
@@ -36,9 +69,17 @@ async def lifespan(_: FastAPI):
         await cluster_poller.stop()
         await obs_service.close()
         await prompt_store.close()
+        await agents_service.close()
 
 
 app = FastAPI(title="Lerna Observation Backend", version="0.1.0", lifespan=lifespan)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 @app.get("/api/obs/health", response_model=HealthResponse)
@@ -146,6 +187,109 @@ async def get_agent_prompts(ids: Optional[str] = Query(None, description="Comma-
         )
     except Exception as exc:  # pylint: disable=broad-except
         raise HTTPException(status_code=502, detail=f"Failed to load prompts from Redis: {exc}") from exc
+
+
+@app.get("/api/agents/workflows/latest", response_model=AgentWorkflowResponse)
+async def get_latest_agent_workflow():
+    try:
+        return await agents_service.get_latest_workflow()
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code == 404:
+            raise HTTPException(status_code=404, detail="No active workflow found") from exc
+        logger.exception("Failed to query latest workflow")
+        raise HTTPException(status_code=502, detail="Failed to query latest workflow") from exc
+    except Exception as exc:  # pylint: disable=broad-except
+        logger.exception("Failed to query latest workflow")
+        raise HTTPException(status_code=502, detail=f"Failed to query latest workflow: {exc}") from exc
+
+
+@app.get("/api/agents/workflows", response_model=AgentWorkflowListResponse)
+async def list_agent_workflows(limit: int = Query(25, ge=1, le=200)):
+    try:
+        return await agents_service.list_workflows(limit=limit)
+    except httpx.HTTPStatusError as exc:
+        logger.exception("Failed to query workflow list")
+        raise HTTPException(status_code=502, detail="Failed to query workflow list") from exc
+    except Exception as exc:  # pylint: disable=broad-except
+        logger.exception("Failed to query workflow list")
+        raise HTTPException(status_code=502, detail=f"Failed to query workflow list: {exc}") from exc
+
+
+@app.get("/api/agents/workflows/{workflow_id}", response_model=AgentWorkflowResponse)
+async def get_agent_workflow(workflow_id: str):
+    try:
+        return await agents_service.get_workflow(workflow_id)
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code == 404:
+            raise HTTPException(status_code=404, detail="Workflow not found") from exc
+        logger.exception("Failed to query workflow %s", workflow_id)
+        raise HTTPException(status_code=502, detail="Failed to query workflow") from exc
+    except Exception as exc:  # pylint: disable=broad-except
+        logger.exception("Failed to query workflow %s", workflow_id)
+        raise HTTPException(status_code=502, detail=f"Failed to query workflow: {exc}") from exc
+
+
+@app.post("/api/agents/orchestrator/chat", response_model=OrchestratorChatResponse)
+async def orchestrator_chat(payload: OrchestratorChatRequest):
+    try:
+        return await agents_service.orchestrator_chat(payload.dict(exclude_none=True))
+    except httpx.HTTPStatusError as exc:
+        logger.exception("Orchestrator chat failed")
+        fallback = "Orchestrator chat failed"
+        try:
+            body = exc.response.json()
+            detail = _upstream_error_detail(body, fallback)
+        except Exception:  # pylint: disable=broad-exception-caught
+            try:
+                detail = (exc.response.text or "").strip() or fallback
+            except Exception:  # pylint: disable=broad-exception-caught
+                detail = fallback
+        raise HTTPException(status_code=502, detail=detail) from exc
+    except httpx.ReadTimeout as exc:
+        logger.exception("Orchestrator chat timed out")
+        raise HTTPException(
+            status_code=504,
+            detail=(
+                "Orchestrator chat timed out waiting for the agents service (LLM). "
+                "Set AGENTS_ORCHESTRATOR_TIMEOUT_SECONDS on the backend deployment if needed, "
+                "or ensure OPENROUTER_API_KEY is set on lerna-agents."
+            ),
+        ) from exc
+    except httpx.ConnectError as exc:
+        logger.exception("Orchestrator chat upstream unreachable")
+        req = getattr(exc, "request", None)
+        url = req.url if req is not None else "agents service"
+        raise HTTPException(
+            status_code=502,
+            detail=f"Cannot reach agents service ({url}): {exc}",
+        ) from exc
+    except Exception as exc:  # pylint: disable=broad-except
+        logger.exception("Orchestrator chat failed")
+        raise HTTPException(status_code=502, detail=f"Orchestrator chat failed: {exc}") from exc
+
+
+@app.get("/api/agents/cost-settings", response_model=AgentCostSettingsResponse)
+async def get_agent_cost_settings():
+    try:
+        return await agents_service.get_cost_settings()
+    except httpx.HTTPStatusError as exc:
+        logger.exception("Failed to query agent cost settings")
+        raise HTTPException(status_code=502, detail="Failed to query cost settings") from exc
+    except Exception as exc:  # pylint: disable=broad-except
+        logger.exception("Failed to query agent cost settings")
+        raise HTTPException(status_code=502, detail=f"Failed to query cost settings: {exc}") from exc
+
+
+@app.put("/api/agents/cost-settings", response_model=AgentCostSettingsResponse)
+async def update_agent_cost_settings(payload: AgentCostSettingsUpdateRequest):
+    try:
+        return await agents_service.update_cost_settings(payload.max_daily_cost)
+    except httpx.HTTPStatusError as exc:
+        logger.exception("Failed to update agent cost settings")
+        raise HTTPException(status_code=502, detail="Failed to update cost settings") from exc
+    except Exception as exc:  # pylint: disable=broad-except
+        logger.exception("Failed to update agent cost settings")
+        raise HTTPException(status_code=502, detail=f"Failed to update cost settings: {exc}") from exc
 
 
 @app.put("/api/agents/prompts/{agent_id}", response_model=AgentPromptEntry)

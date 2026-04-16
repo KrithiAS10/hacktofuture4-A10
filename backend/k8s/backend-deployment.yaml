@@ -28,11 +28,15 @@ spec:
             - name: JAEGER_URL
               value: http://jaeger.observability.svc.cluster.local:16686
             - name: REDIS_URL
-              value: redis://redis.lerna.svc.cluster.local:6379/0
+              value: redis://redis:6379/0
+            - name: AGENTS_SERVICE_URL
+              value: http://lerna-agents.lerna.svc.cluster.local:8000
             - name: ENABLE_K8S_POLLER
               value: "true"
             - name: POLL_INTERVAL_SECONDS
               value: "15"
+            - name: AGENTS_ORCHESTRATOR_TIMEOUT_SECONDS
+              value: "120"
 ---
 apiVersion: v1
 kind: Service

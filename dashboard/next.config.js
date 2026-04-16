@@ -1,5 +1,7 @@
 /** @type {import('next').NextConfig} */
-const backendBaseUrl = (process.env.BACKEND_BASE_URL || 'http://localhost:8000').replace(/\/$/, '')
+const defaultBackendBaseUrl =
+  process.env.NODE_ENV === 'production' ? 'http://lerna-backend:8000' : 'http://localhost:8000'
+const backendBaseUrl = (process.env.BACKEND_BASE_URL || defaultBackendBaseUrl).replace(/\/$/, '')
 
 const nextConfig = {
   output: 'standalone',

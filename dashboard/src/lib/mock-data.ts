@@ -15,6 +15,7 @@ export interface Incident {
   timestamp: string;
   duration: string;
   assignedAgent: string;
+  cost: number;
 }
 
 export interface Agent {
@@ -57,6 +58,7 @@ export const incidents: Incident[] = [
     timestamp: '2 min ago',
     duration: '00:02:14',
     assignedAgent: 'Diagnosis Agent',
+    cost: 8.0,
   },
   {
     id: 'INC-2024-0890',
@@ -69,6 +71,7 @@ export const incidents: Incident[] = [
     timestamp: '14 min ago',
     duration: '00:14:33',
     assignedAgent: 'Planning Agent',
+    cost: 5.0,
   },
   {
     id: 'INC-2024-0889',
@@ -81,6 +84,7 @@ export const incidents: Incident[] = [
     timestamp: '31 min ago',
     duration: '00:31:07',
     assignedAgent: 'Filter Agent',
+    cost: 5.0,
   },
   {
     id: 'INC-2024-0888',
@@ -93,6 +97,7 @@ export const incidents: Incident[] = [
     timestamp: '38 min ago',
     duration: '00:12:44',
     assignedAgent: 'Executor Agent',
+    cost: 2.5,
   },
   {
     id: 'INC-2024-0887',
@@ -105,6 +110,7 @@ export const incidents: Incident[] = [
     timestamp: '1h ago',
     duration: '00:08:22',
     assignedAgent: 'Executor Agent',
+    cost: 1.0,
   },
 ];
 
@@ -194,35 +200,6 @@ export const incidentLogs: LogLine[] = [
   { time: '14:30:07.234', level: 'WARN',  message: 'Awaiting approval: confidence score 0.87 — human review recommended' },
   { time: '14:30:07.890', level: 'INFO',  message: 'Executor Agent: Standing by for approval signal...' },
   { time: '14:30:08.123', level: 'ERROR', message: 'payment-service: 847 requests failed in last 60s' },
-];
-
-export const initialChatMessages: ChatMessage[] = [
-  {
-    id: '1',
-    role: 'assistant',
-    content: "👋 Hi! I'm Lerna, your autonomous SRE assistant. I have full visibility into your cluster, incidents, and agent pipeline.\n\nI can help you investigate incidents, explain root causes, apply fixes, run simulations, or query metrics. What's on your mind?",
-    timestamp: '14:28:00',
-  },
-  {
-    id: '2',
-    role: 'user',
-    content: "What's causing the payment-service incident right now?",
-    timestamp: '14:30:22',
-  },
-  {
-    id: '3',
-    role: 'assistant',
-    content: "I've analyzed **INC-2024-0891** and the Diagnosis Agent has identified the root cause with 87% confidence:\n\n**Primary:** Database connection pool exhaustion on `db-primary:5432`. The pool is capped at 100 connections, which was hit during a 340% traffic spike from the ongoing marketing campaign.\n\n**Proposed fix:** Increase pool size to 200 and route 68% of read queries to the replica. Should reduce error rate to <0.5% within 2 minutes of application. Want me to apply it?",
-    timestamp: '14:30:24',
-  },
-];
-
-export const cannedResponses = [
-  "Applying fix to production now. Executor Agent is increasing the DB connection pool from 100 → 200 and enabling read replica routing. ETA: ~90 seconds. I'll notify you once Validation Agent confirms the error rate drops below 1%.",
-  "Currently there are **3 active incidents**: INC-2024-0891 (P1 - payment-service), INC-2024-0890 (P2 - api-gateway), and INC-2024-0889 (P2 - user-service). The P1 is the most urgent and has a proposed fix ready.",
-  "Cluster health score is **94/100**. All 32 nodes are responsive, CPU at 68%, memory at 74%. The minor deductions are due to the 3 active incidents. Overall SLO attainment this week is 99.91%.",
-  "Sandbox simulation complete (12.3s runtime):\n\n• Error rate: 18.7% → **0.3%**\n• P95 latency: 892ms → **148ms**\n• Connection pool utilization: 100% → **52%**\n\nAll 14 health checks passed. Ready to apply to production?",
-  "The Diagnosis Agent has identified 3 potential causes. DB pool exhaustion is the primary culprit (87% confidence). I recommend applying the pool-size fix first, then monitoring for 5 minutes before addressing the read-replica routing.",
 ];
 
 export function generateTimeSeriesData(base: number, length: number, variance: number): number[] {

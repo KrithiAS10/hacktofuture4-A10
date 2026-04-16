@@ -16,7 +16,7 @@ spec:
       serviceAccountName: otel-collector
       containers:
         - name: otel-collector
-          image: otel/opentelemetry-collector-contrib:0.124.1
+          image: otel/opentelemetry-collector-contrib:0.118.0
           args: ["--config=/conf/otel-collector-k8s-config.yaml"]
           env:
             - name: NODE_IP

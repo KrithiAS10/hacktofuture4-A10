@@ -8,6 +8,25 @@ metadata:
 spec:
   ingressClassName: nginx
   rules:
+    # Browser Host header when using http://localhost:8080
+    - host: localhost
+      http:
+        paths:
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: lerna-backend
+                port:
+                  number: 8000
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: lerna-dashboard
+                port:
+                  number: 3000
+    # Optional: add "127.0.0.1 lerna.local" to hosts and open http://lerna.local:8080
     - host: lerna.local
       http:
         paths:
