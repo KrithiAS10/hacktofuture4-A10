@@ -5,24 +5,31 @@ from pathlib import Path
 
 
 def _load_dotenv_if_present() -> None:
-    """Load agents-layer/.env for local runs. In Kubernetes use Secret envFrom; .env is not in the image."""
+    """Load agents-layer/.env (or project root .env) for local runs.
+    In Kubernetes use Secret envFrom; .env is not in the image."""
     try:
         from dotenv import load_dotenv
     except ImportError:
         return
-    env_path = Path(__file__).resolve().parent / ".env"
-    if env_path.is_file():
-        # Do not override real process env (e.g. K8s-injected secrets).
-        load_dotenv(env_path, override=False)
+    # First try the agents-layer local .env, then fall back to the project-root .env.
+    service_env = Path(__file__).resolve().parent / ".env"
+    root_env = Path(__file__).resolve().parent.parent / ".env"
+    for env_path in (service_env, root_env):
+        if env_path.is_file():
+            # Do not override real process env (e.g. K8s-injected secrets).
+            load_dotenv(env_path, override=False)
+            break
 
 
 _load_dotenv_if_present()
 
+import asyncio
 import logging
 import sys
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from lerna_shared.detection import AgentTriggerResponse, DetectionIncident
@@ -102,6 +109,13 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(title="Lerna Agents Service", version="0.1.0", lifespan=lifespan)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 @app.get("/health")
@@ -186,12 +200,12 @@ async def chat_with_orchestrator(payload: dict):
             workflow = await workflow_store.get_workflow(workflow_id)
         elif incident_id:
             workflow = await workflow_store.get_workflow_for_incident(incident_id)
-        else:
-            # Default to the latest workflow so the orchestrator has context
-            # even if the frontend doesn't provide a workflow_id.
-            workflow = await workflow_store.get_last_workflow()
 
-        response = orchestrator_chat(payload.get("message", ""), workflow=workflow, history=history)
+        response = orchestrator_chat(
+            payload.get("message", ""),
+            workflow=workflow,
+            history=history if isinstance(history, list) else None,
+        )
         return response
     except Exception as exc:  # pylint: disable=broad-except
         raise HTTPException(status_code=502, detail=f"Orchestrator chat failed: {exc}") from exc

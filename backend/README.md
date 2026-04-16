@@ -42,6 +42,15 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 - `POLL_INTERVAL_SECONDS` (default: `15`)
 - `POLL_TIMEOUT_SECONDS` (default: `20`)
 
+### Local development notes
+
+- When running `dashboard` locally with the backend on `http://localhost:8000`, set `NEXT_PUBLIC_API_BASE_URL=http://localhost:8000/api`.
+- When using a local backend with a cluster-deployed agents service, port-forward the agents service and set `AGENTS_SERVICE_URL=http://localhost:8001`.
+  ```powershell
+  kubectl port-forward -n lerna service/lerna-agents 8001:8000
+  ```
+- If running the backend inside Kubernetes, keep the default `'/api'` path or configure an ingress proxy.
+
 ## Notes
 
 - The Kubernetes poller auto-loads in-cluster config first, then kubeconfig.

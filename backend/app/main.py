@@ -6,6 +6,7 @@ from typing import Any, Optional
 
 import httpx
 from fastapi import FastAPI, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
 
 from app.models import (
     AgentCostSettingsResponse,
@@ -72,6 +73,13 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(title="Lerna Observation Backend", version="0.1.0", lifespan=lifespan)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 @app.get("/api/obs/health", response_model=HealthResponse)

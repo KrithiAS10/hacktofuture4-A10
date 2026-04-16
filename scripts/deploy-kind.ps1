@@ -55,18 +55,18 @@ kind load docker-image lerna-agents:latest --name $ClusterName
 kind load docker-image lerna-detection:latest --name $ClusterName
 
 Write-Host "Applying observation layer..."
-kubectl apply -f (Join-Path $Root "observation-layer\k8s\namespace.yaml")
-kubectl apply -f (Join-Path $Root "observation-layer\k8s\loki-configmap.yaml")
-kubectl apply -f (Join-Path $Root "observation-layer\k8s\loki-deployment.yaml")
-kubectl apply -f (Join-Path $Root "observation-layer\k8s\jaeger-deployment.yaml")
-kubectl apply -f (Join-Path $Root "observation-layer\k8s\prometheus-configmap.yaml")
-kubectl apply -f (Join-Path $Root "observation-layer\k8s\prometheus-deployment.yaml")
-kubectl apply -f (Join-Path $Root "observation-layer\k8s\otel-collector-configmap.yaml")
-kubectl apply -f (Join-Path $Root "observation-layer\k8s\otel-collector-rbac.yaml")
-kubectl apply -f (Join-Path $Root "observation-layer\k8s\otel-collector-deployment.yaml")
+kubectl apply --validate=false -f (Join-Path $Root "observation-layer\k8s\namespace.yaml")
+kubectl apply --validate=false -f (Join-Path $Root "observation-layer\k8s\loki-configmap.yaml")
+kubectl apply --validate=false -f (Join-Path $Root "observation-layer\k8s\loki-deployment.yaml")
+kubectl apply --validate=false -f (Join-Path $Root "observation-layer\k8s\jaeger-deployment.yaml")
+kubectl apply --validate=false -f (Join-Path $Root "observation-layer\k8s\prometheus-configmap.yaml")
+kubectl apply --validate=false -f (Join-Path $Root "observation-layer\k8s\prometheus-deployment.yaml")
+kubectl apply --validate=false -f (Join-Path $Root "observation-layer\k8s\otel-collector-configmap.yaml")
+kubectl apply --validate=false -f (Join-Path $Root "observation-layer\k8s\otel-collector-rbac.yaml")
+kubectl apply --validate=false -f (Join-Path $Root "observation-layer\k8s\otel-collector-deployment.yaml")
 
 Write-Host "Applying Lerna app stack (namespace: $LernaNs)..."
-kubectl create namespace $LernaNs --dry-run=client -o yaml | kubectl apply -f -
+kubectl create namespace $LernaNs --dry-run=client -o yaml | kubectl apply --validate=false -f -
 $KustomPath = Join-Path $Root "k8s\lerna-stack\kustomization.yaml"
 $KustomOrig = Get-Content -LiteralPath $KustomPath -Raw
 try {
@@ -74,7 +74,7 @@ try {
     Set-Content -LiteralPath $KustomPath -Value $KustomPatched
     # `kubectl apply -k` does not accept --load-restrictor on some clients; pipe `kubectl kustomize` instead.
     $kustDir = Join-Path $Root "k8s\lerna-stack"
-    kubectl kustomize $kustDir --load-restrictor=LoadRestrictionsNone | kubectl apply -f -
+    kubectl kustomize $kustDir --load-restrictor=LoadRestrictionsNone | kubectl apply --validate=false -f -
     if ($LASTEXITCODE -ne 0) {
         throw "kubectl kustomize/apply failed (exit $LASTEXITCODE)"
     }

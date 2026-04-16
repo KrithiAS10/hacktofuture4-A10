@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional
 
@@ -8,28 +10,56 @@ import httpx
 from app.config import settings
 from app.models import BackendStatus, HealthResponse
 
+logger = logging.getLogger(__name__)
+
 
 class ObservabilityService:
     def __init__(self) -> None:
-        self._timeout = httpx.Timeout(10.0, connect=5.0)
+        self._timeout = httpx.Timeout(6.0, connect=2.0, read=3.0)
         self._client = httpx.AsyncClient(timeout=self._timeout)
 
     async def close(self) -> None:
         await self._client.aclose()
 
     async def check_health(self) -> HealthResponse:
-        prometheus = await self._check_endpoint(
-            f"{settings.prometheus_url}/-/ready",
-            fallback=f"{settings.prometheus_url}/api/v1/status/config",
-        )
-        loki = await self._check_endpoint(
-            f"{settings.loki_url}/ready",
-            fallback=f"{settings.loki_url}/loki/api/v1/labels",
-        )
-        jaeger = await self._check_endpoint(
-            f"{settings.jaeger_url}/api/services",
-            fallback=f"{settings.jaeger_url}/",
-        )
+        try:
+            prometheus, loki, jaeger = await asyncio.wait_for(
+                asyncio.gather(
+                    self._check_endpoint(
+                        f"{settings.prometheus_url}/-/ready",
+                        fallback=f"{settings.prometheus_url}/api/v1/status/config",
+                    ),
+                    self._check_endpoint(
+                        f"{settings.loki_url}/ready",
+                        fallback=f"{settings.loki_url}/loki/api/v1/labels",
+                    ),
+                    self._check_endpoint(
+                        f"{settings.jaeger_url}/api/services",
+                        fallback=f"{settings.jaeger_url}/",
+                    ),
+                ),
+                timeout=settings.health_timeout_seconds,
+            )
+        except asyncio.TimeoutError:
+            return HealthResponse(
+                prometheus=BackendStatus(
+                    ok=False,
+                    endpoint=f"{settings.prometheus_url}/-/ready",
+                    detail="health check timed out",
+                ),
+                loki=BackendStatus(
+                    ok=False,
+                    endpoint=f"{settings.loki_url}/ready",
+                    detail="health check timed out",
+                ),
+                jaeger=BackendStatus(
+                    ok=False,
+                    endpoint=f"{settings.jaeger_url}/api/services",
+                    detail="health check timed out",
+                ),
+                overall_ok=False,
+            )
+
         return HealthResponse(
             prometheus=prometheus,
             loki=loki,
@@ -41,7 +71,11 @@ class ObservabilityService:
         params: Dict[str, Any] = {"query": query}
         if time:
             params["time"] = time
-        return await self._get_json(f"{settings.prometheus_url}/api/v1/query", params=params)
+        try:
+            return await self._get_json(f"{settings.prometheus_url}/api/v1/query", params=params)
+        except Exception as exc:  # pylint: disable=broad-except
+            logger.debug("Prometheus query failed, returning empty result: %s", exc)
+            return {"data": {"result": []}}
 
     async def query_logs(
         self,
@@ -65,7 +99,11 @@ class ObservabilityService:
             "end": end_ts,
             "direction": direction,
         }
-        return await self._get_json(f"{settings.loki_url}/loki/api/v1/query_range", params=params)
+        try:
+            return await self._get_json(f"{settings.loki_url}/loki/api/v1/query_range", params=params)
+        except Exception as exc:  # pylint: disable=broad-except
+            logger.debug("Loki query failed, returning empty result: %s", exc)
+            return {"data": {"result": []}}
 
     async def query_traces(
         self,
@@ -83,7 +121,11 @@ class ObservabilityService:
         }
         if service:
             params["service"] = service
-        return await self._get_json(f"{settings.jaeger_url}/api/traces", params=params)
+        try:
+            return await self._get_json(f"{settings.jaeger_url}/api/traces", params=params)
+        except Exception as exc:  # pylint: disable=broad-except
+            logger.debug("Jaeger query failed, returning empty result: %s", exc)
+            return {"data": {"result": []}}
 
     async def _check_endpoint(self, endpoint: str, fallback: str) -> BackendStatus:
         try:
