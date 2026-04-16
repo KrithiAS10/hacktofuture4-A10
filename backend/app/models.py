@@ -56,3 +56,24 @@ class AgentPromptsResponse(BaseModel):
 class AgentPromptResetResponse(BaseModel):
     agent_id: str
     reset: bool
+
+
+class AgentWorkflowResponse(BaseModel):
+    workflow_id: str
+    incident_id: str
+    status: str
+    accepted_at: str
+    started_at: Optional[str] = None
+    finished_at: Optional[str] = None
+    result: Optional[Dict[str, Any]] = None
+
+
+class OrchestratorChatRequest(BaseModel):
+    message: str
+    workflow_id: Optional[str] = None
+    incident_id: Optional[str] = None
+
+
+class OrchestratorChatResponse(BaseModel):
+    message: str
+    workflow_id: Optional[str] = None

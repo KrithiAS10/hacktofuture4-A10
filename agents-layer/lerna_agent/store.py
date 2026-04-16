@@ -9,6 +9,7 @@ from tools._config import settings
 
 WORKFLOW_KEY_PREFIX = "lerna:agents:workflow:"
 INCIDENT_WORKFLOW_KEY_PREFIX = "lerna:agents:incident:"
+LAST_WORKFLOW_KEY = "lerna:agents:workflow:last"
 
 
 class WorkflowStore:
@@ -27,6 +28,16 @@ class WorkflowStore:
 
     async def save_workflow(self, workflow_id: str, data: Dict[str, Any]) -> None:
         await self._redis.set(f"{WORKFLOW_KEY_PREFIX}{workflow_id}", json.dumps(data))
+        await self._redis.set(LAST_WORKFLOW_KEY, workflow_id)
+
+    async def get_last_workflow_id(self) -> Optional[str]:
+        return await self._redis.get(LAST_WORKFLOW_KEY)
+
+    async def get_last_workflow(self) -> Optional[Dict[str, Any]]:
+        workflow_id = await self.get_last_workflow_id()
+        if not workflow_id:
+            return None
+        return await self.get_workflow(workflow_id)
 
     async def get_workflow_for_incident(self, incident_id: str) -> Optional[Dict[str, Any]]:
         workflow_id = await self._redis.get(f"{INCIDENT_WORKFLOW_KEY_PREFIX}{incident_id}")

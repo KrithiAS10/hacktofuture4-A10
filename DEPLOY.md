@@ -18,6 +18,8 @@ Expected:
 - context: `kind-testapp`
 - cluster: `testapp`
 
+> If Docker is not running, `kind get clusters` will fail with a Docker pipe error. Start Docker Desktop / Docker daemon before continuing.
+
 ## 2. Build local images
 
 Run these from the repo root:
@@ -89,6 +91,15 @@ kubectl rollout status deployment/lerna-backend -n lerna --timeout=120s
 kubectl rollout status deployment/lerna-agents -n lerna --timeout=120s
 kubectl rollout status deployment/lerna-detection -n lerna --timeout=120s
 kubectl rollout status deployment/lerna-dashboard -n lerna --timeout=120s
+```
+
+If `kubectl rollout status` fails or crashes, use the safer fallback:
+
+```powershell
+kubectl get pods -n observability -o wide
+kubectl get pods -n lerna -o wide
+kubectl get svc -n lerna
+kubectl get ingress -n lerna
 ```
 
 ## 8. Inspect running workloads

@@ -4,6 +4,7 @@ import logging
 from contextlib import asynccontextmanager
 from typing import Optional
 
+import httpx
 from fastapi import FastAPI, HTTPException, Query
 
 from app.models import (
@@ -11,10 +12,14 @@ from app.models import (
     AgentPromptResetResponse,
     AgentPromptsResponse,
     AgentPromptUpdateRequest,
+    AgentWorkflowResponse,
+    OrchestratorChatRequest,
+    OrchestratorChatResponse,
     ClusterSummary,
     DetectionCheckResponse,
     HealthResponse,
 )
+from app.services.agents_service import AgentsService
 from app.services.cluster_poller import ClusterPoller
 from app.services.detection import DetectionService
 from app.services.observability import ObservabilityService
@@ -24,6 +29,7 @@ obs_service = ObservabilityService()
 cluster_poller = ClusterPoller(obs_service=obs_service)
 detection_service = DetectionService(obs_service)
 prompt_store = PromptStoreService()
+agents_service = AgentsService()
 logger = logging.getLogger(__name__)
 
 
@@ -36,6 +42,7 @@ async def lifespan(_: FastAPI):
         await cluster_poller.stop()
         await obs_service.close()
         await prompt_store.close()
+        await agents_service.close()
 
 
 app = FastAPI(title="Lerna Observation Backend", version="0.1.0", lifespan=lifespan)
@@ -146,6 +153,46 @@ async def get_agent_prompts(ids: Optional[str] = Query(None, description="Comma-
         )
     except Exception as exc:  # pylint: disable=broad-except
         raise HTTPException(status_code=502, detail=f"Failed to load prompts from Redis: {exc}") from exc
+
+
+@app.get("/api/agents/workflows/latest", response_model=AgentWorkflowResponse)
+async def get_latest_agent_workflow():
+    try:
+        return await agents_service.get_latest_workflow()
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code == 404:
+            raise HTTPException(status_code=404, detail="No active workflow found") from exc
+        logger.exception("Failed to query latest workflow")
+        raise HTTPException(status_code=502, detail="Failed to query latest workflow") from exc
+    except Exception as exc:  # pylint: disable=broad-except
+        logger.exception("Failed to query latest workflow")
+        raise HTTPException(status_code=502, detail=f"Failed to query latest workflow: {exc}") from exc
+
+
+@app.get("/api/agents/workflows/{workflow_id}", response_model=AgentWorkflowResponse)
+async def get_agent_workflow(workflow_id: str):
+    try:
+        return await agents_service.get_workflow(workflow_id)
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code == 404:
+            raise HTTPException(status_code=404, detail="Workflow not found") from exc
+        logger.exception("Failed to query workflow %s", workflow_id)
+        raise HTTPException(status_code=502, detail="Failed to query workflow") from exc
+    except Exception as exc:  # pylint: disable=broad-except
+        logger.exception("Failed to query workflow %s", workflow_id)
+        raise HTTPException(status_code=502, detail=f"Failed to query workflow: {exc}") from exc
+
+
+@app.post("/api/agents/orchestrator/chat", response_model=OrchestratorChatResponse)
+async def orchestrator_chat(payload: OrchestratorChatRequest):
+    try:
+        return await agents_service.orchestrator_chat(payload.dict(exclude_none=True))
+    except httpx.HTTPStatusError as exc:
+        logger.exception("Orchestrator chat failed")
+        raise HTTPException(status_code=502, detail="Orchestrator chat failed") from exc
+    except Exception as exc:  # pylint: disable=broad-except
+        logger.exception("Orchestrator chat failed")
+        raise HTTPException(status_code=502, detail=f"Orchestrator chat failed: {exc}") from exc
 
 
 @app.put("/api/agents/prompts/{agent_id}", response_model=AgentPromptEntry)

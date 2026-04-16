@@ -27,6 +27,8 @@ from lerna_shared.detection import AgentTriggerResponse, DetectionIncident
 
 from lerna_agent.runtime import accept_incident
 from lerna_agent.store import WorkflowStore
+from langgraph.runtime import accept_incident as accept_langgraph_incident
+from langgraph.orchestrator import orchestrator_chat
 
 _pkg_log = logging.getLogger("lerna_agent")
 _pkg_log.setLevel(logging.INFO)
@@ -63,9 +65,42 @@ async def create_incident_workflow(payload: DetectionIncident) -> AgentTriggerRe
         raise HTTPException(status_code=502, detail=f"Failed to start incident workflow: {exc}") from exc
 
 
+@app.post("/langgraph-incidents", response_model=AgentTriggerResponse)
+async def create_langgraph_incident_workflow(payload: DetectionIncident) -> AgentTriggerResponse:
+    try:
+        return await accept_langgraph_incident(payload, workflow_store)
+    except Exception as exc:  # pylint: disable=broad-except
+        raise HTTPException(status_code=502, detail=f"Failed to start LangGraph incident workflow: {exc}") from exc
+
+
+@app.get("/workflows/latest")
+async def get_latest_workflow():
+    workflow = await workflow_store.get_last_workflow()
+    if not workflow:
+        raise HTTPException(status_code=404, detail="No workflow found")
+    return workflow
+
+
 @app.get("/workflows/{workflow_id}")
 async def get_workflow(workflow_id: str):
     workflow = await workflow_store.get_workflow(workflow_id)
     if not workflow:
         raise HTTPException(status_code=404, detail="Workflow not found")
     return workflow
+
+
+@app.post("/orchestrator/chat")
+async def chat_with_orchestrator(payload: dict):
+    try:
+        workflow_id = payload.get("workflow_id")
+        incident_id = payload.get("incident_id")
+        workflow = None
+        if workflow_id:
+            workflow = await workflow_store.get_workflow(workflow_id)
+        elif incident_id:
+            workflow = await workflow_store.get_workflow_for_incident(incident_id)
+
+        response = orchestrator_chat(payload.get("message", ""), workflow=workflow)
+        return response
+    except Exception as exc:  # pylint: disable=broad-except
+        raise HTTPException(status_code=502, detail=f"Orchestrator chat failed: {exc}") from exc

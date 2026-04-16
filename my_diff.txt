@@ -1,0 +1,1366 @@
+diff --git a/DEPLOY.md b/DEPLOY.md
+index 2a1fc8f..3df9ec4 100644
+--- a/DEPLOY.md
++++ b/DEPLOY.md
+@@ -18,6 +18,8 @@ Expected:
+ - context: `kind-testapp`
+ - cluster: `testapp`
+ 
++> If Docker is not running, `kind get clusters` will fail with a Docker pipe error. Start Docker Desktop / Docker daemon before continuing.
++
+ ## 2. Build local images
+ 
+ Run these from the repo root:
+@@ -91,6 +93,15 @@ kubectl rollout status deployment/lerna-detection -n lerna --timeout=120s
+ kubectl rollout status deployment/lerna-dashboard -n lerna --timeout=120s
+ ```
+ 
++If `kubectl rollout status` fails or crashes, use the safer fallback:
++
++```powershell
++kubectl get pods -n observability -o wide
++kubectl get pods -n lerna -o wide
++kubectl get svc -n lerna
++kubectl get ingress -n lerna
++```
++
+ ## 8. Inspect running workloads
+ 
+ ```powershell
+diff --git a/agents-layer/lerna_agent/store.py b/agents-layer/lerna_agent/store.py
+index 395f3dd..7f5629b 100644
+--- a/agents-layer/lerna_agent/store.py
++++ b/agents-layer/lerna_agent/store.py
+@@ -9,6 +9,7 @@ from tools._config import settings
+ 
+ WORKFLOW_KEY_PREFIX = "lerna:agents:workflow:"
+ INCIDENT_WORKFLOW_KEY_PREFIX = "lerna:agents:incident:"
++LAST_WORKFLOW_KEY = "lerna:agents:workflow:last"
+ 
+ 
+ class WorkflowStore:
+@@ -27,6 +28,16 @@ class WorkflowStore:
+ 
+     async def save_workflow(self, workflow_id: str, data: Dict[str, Any]) -> None:
+         await self._redis.set(f"{WORKFLOW_KEY_PREFIX}{workflow_id}", json.dumps(data))
++        await self._redis.set(LAST_WORKFLOW_KEY, workflow_id)
++
++    async def get_last_workflow_id(self) -> Optional[str]:
++        return await self._redis.get(LAST_WORKFLOW_KEY)
++
++    async def get_last_workflow(self) -> Optional[Dict[str, Any]]:
++        workflow_id = await self.get_last_workflow_id()
++        if not workflow_id:
++            return None
++        return await self.get_workflow(workflow_id)
+ 
+     async def get_workflow_for_incident(self, incident_id: str) -> Optional[Dict[str, Any]]:
+         workflow_id = await self._redis.get(f"{INCIDENT_WORKFLOW_KEY_PREFIX}{incident_id}")
+diff --git a/agents-layer/requirements.txt b/agents-layer/requirements.txt
+index caa8521..52c1bd1 100644
+--- a/agents-layer/requirements.txt
++++ b/agents-layer/requirements.txt
+@@ -9,3 +9,5 @@ fastapi>=0.115.0
+ uvicorn[standard]>=0.30.0
+ redis>=5.2.0
+ pytest>=8.0.0
++langgraph>=0.6.0
++langchain-openai>=0.0.0
+diff --git a/agents-layer/service_main.py b/agents-layer/service_main.py
+index daf4b68..038853b 100644
+--- a/agents-layer/service_main.py
++++ b/agents-layer/service_main.py
+@@ -8,6 +8,8 @@ from lerna_shared.detection import AgentTriggerResponse, DetectionIncident
+ 
+ from lerna_agent.runtime import accept_incident
+ from lerna_agent.store import WorkflowStore
++from langgraph.runtime import accept_incident as accept_langgraph_incident
++from langgraph.orchestrator import orchestrator_chat
+ 
+ workflow_store = WorkflowStore()
+ 
+@@ -36,9 +38,42 @@ async def create_incident_workflow(payload: DetectionIncident) -> AgentTriggerRe
+         raise HTTPException(status_code=502, detail=f"Failed to start incident workflow: {exc}") from exc
+ 
+ 
++@app.post("/langgraph-incidents", response_model=AgentTriggerResponse)
++async def create_langgraph_incident_workflow(payload: DetectionIncident) -> AgentTriggerResponse:
++    try:
++        return await accept_langgraph_incident(payload, workflow_store)
++    except Exception as exc:  # pylint: disable=broad-except
++        raise HTTPException(status_code=502, detail=f"Failed to start LangGraph incident workflow: {exc}") from exc
++
++
++@app.get("/workflows/latest")
++async def get_latest_workflow():
++    workflow = await workflow_store.get_last_workflow()
++    if not workflow:
++        raise HTTPException(status_code=404, detail="No workflow found")
++    return workflow
++
++
+ @app.get("/workflows/{workflow_id}")
+ async def get_workflow(workflow_id: str):
+     workflow = await workflow_store.get_workflow(workflow_id)
+     if not workflow:
+         raise HTTPException(status_code=404, detail="Workflow not found")
+     return workflow
++
++
++@app.post("/orchestrator/chat")
++async def chat_with_orchestrator(payload: dict):
++    try:
++        workflow_id = payload.get("workflow_id")
++        incident_id = payload.get("incident_id")
++        workflow = None
++        if workflow_id:
++            workflow = await workflow_store.get_workflow(workflow_id)
++        elif incident_id:
++            workflow = await workflow_store.get_workflow_for_incident(incident_id)
++
++        response = orchestrator_chat(payload.get("message", ""), workflow=workflow)
++        return response
++    except Exception as exc:  # pylint: disable=broad-except
++        raise HTTPException(status_code=502, detail=f"Orchestrator chat failed: {exc}") from exc
+diff --git a/backend/app/config.py b/backend/app/config.py
+index d1c5df6..b526112 100644
+--- a/backend/app/config.py
++++ b/backend/app/config.py
+@@ -16,6 +16,7 @@ class Settings:
+         self.loki_url = os.getenv("LOKI_URL", "http://localhost:3100").rstrip("/")
+         self.jaeger_url = os.getenv("JAEGER_URL", "http://localhost:16686").rstrip("/")
+         self.redis_url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
++        self.agents_service_url = os.getenv("AGENTS_SERVICE_URL", "http://localhost:8000").rstrip("/")
+ 
+         self.enable_k8s_poller = _as_bool(os.getenv("ENABLE_K8S_POLLER", "True"), True)
+         self.k8s_namespace_scope = os.getenv("K8S_NAMESPACE_SCOPE", "").strip()
+diff --git a/backend/app/main.py b/backend/app/main.py
+index 2ab96b8..f7ef5f9 100644
+--- a/backend/app/main.py
++++ b/backend/app/main.py
+@@ -4,6 +4,7 @@ import logging
+ from contextlib import asynccontextmanager
+ from typing import Optional
+ 
++import httpx
+ from fastapi import FastAPI, HTTPException, Query
+ 
+ from app.models import (
+@@ -11,10 +12,14 @@ from app.models import (
+     AgentPromptResetResponse,
+     AgentPromptsResponse,
+     AgentPromptUpdateRequest,
++    AgentWorkflowResponse,
++    OrchestratorChatRequest,
++    OrchestratorChatResponse,
+     ClusterSummary,
+     DetectionCheckResponse,
+     HealthResponse,
+ )
++from app.services.agents_service import AgentsService
+ from app.services.cluster_poller import ClusterPoller
+ from app.services.detection import DetectionService
+ from app.services.observability import ObservabilityService
+@@ -24,6 +29,7 @@ obs_service = ObservabilityService()
+ cluster_poller = ClusterPoller(obs_service=obs_service)
+ detection_service = DetectionService(obs_service)
+ prompt_store = PromptStoreService()
++agents_service = AgentsService()
+ logger = logging.getLogger(__name__)
+ 
+ 
+@@ -36,6 +42,7 @@ async def lifespan(_: FastAPI):
+         await cluster_poller.stop()
+         await obs_service.close()
+         await prompt_store.close()
++        await agents_service.close()
+ 
+ 
+ app = FastAPI(title="Lerna Observation Backend", version="0.1.0", lifespan=lifespan)
+@@ -148,6 +155,46 @@ async def get_agent_prompts(ids: Optional[str] = Query(None, description="Comma-
+         raise HTTPException(status_code=502, detail=f"Failed to load prompts from Redis: {exc}") from exc
+ 
+ 
++@app.get("/api/agents/workflows/latest", response_model=AgentWorkflowResponse)
++async def get_latest_agent_workflow():
++    try:
++        return await agents_service.get_latest_workflow()
++    except httpx.HTTPStatusError as exc:
++        if exc.response.status_code == 404:
++            raise HTTPException(status_code=404, detail="No active workflow found") from exc
++        logger.exception("Failed to query latest workflow")
++        raise HTTPException(status_code=502, detail="Failed to query latest workflow") from exc
++    except Exception as exc:  # pylint: disable=broad-except
++        logger.exception("Failed to query latest workflow")
++        raise HTTPException(status_code=502, detail=f"Failed to query latest workflow: {exc}") from exc
++
++
++@app.get("/api/agents/workflows/{workflow_id}", response_model=AgentWorkflowResponse)
++async def get_agent_workflow(workflow_id: str):
++    try:
++        return await agents_service.get_workflow(workflow_id)
++    except httpx.HTTPStatusError as exc:
++        if exc.response.status_code == 404:
++            raise HTTPException(status_code=404, detail="Workflow not found") from exc
++        logger.exception("Failed to query workflow %s", workflow_id)
++        raise HTTPException(status_code=502, detail="Failed to query workflow") from exc
++    except Exception as exc:  # pylint: disable=broad-except
++        logger.exception("Failed to query workflow %s", workflow_id)
++        raise HTTPException(status_code=502, detail=f"Failed to query workflow: {exc}") from exc
++
++
++@app.post("/api/agents/orchestrator/chat", response_model=OrchestratorChatResponse)
++async def orchestrator_chat(payload: OrchestratorChatRequest):
++    try:
++        return await agents_service.orchestrator_chat(payload.dict(exclude_none=True))
++    except httpx.HTTPStatusError as exc:
++        logger.exception("Orchestrator chat failed")
++        raise HTTPException(status_code=502, detail="Orchestrator chat failed") from exc
++    except Exception as exc:  # pylint: disable=broad-except
++        logger.exception("Orchestrator chat failed")
++        raise HTTPException(status_code=502, detail=f"Orchestrator chat failed: {exc}") from exc
++
++
+ @app.put("/api/agents/prompts/{agent_id}", response_model=AgentPromptEntry)
+ async def update_agent_prompt(agent_id: str, payload: AgentPromptUpdateRequest):
+     try:
+diff --git a/backend/app/models.py b/backend/app/models.py
+index d521b20..b03f600 100644
+--- a/backend/app/models.py
++++ b/backend/app/models.py
+@@ -56,3 +56,24 @@ class AgentPromptsResponse(BaseModel):
+ class AgentPromptResetResponse(BaseModel):
+     agent_id: str
+     reset: bool
++
++
++class AgentWorkflowResponse(BaseModel):
++    workflow_id: str
++    incident_id: str
++    status: str
++    accepted_at: str
++    started_at: Optional[str] = None
++    finished_at: Optional[str] = None
++    result: Optional[Dict[str, Any]] = None
++
++
++class OrchestratorChatRequest(BaseModel):
++    message: str
++    workflow_id: Optional[str] = None
++    incident_id: Optional[str] = None
++
++
++class OrchestratorChatResponse(BaseModel):
++    message: str
++    workflow_id: Optional[str] = None
+diff --git a/backend/k8s/backend-deployment.yaml b/backend/k8s/backend-deployment.yaml
+index f56211f..e58b207 100644
+--- a/backend/k8s/backend-deployment.yaml
++++ b/backend/k8s/backend-deployment.yaml
+@@ -29,6 +29,8 @@ spec:
+               value: http://jaeger.observability.svc.cluster.local:16686
+             - name: REDIS_URL
+               value: redis://redis.lerna.svc.cluster.local:6379/0
++            - name: AGENTS_SERVICE_URL
++              value: http://lerna-agents.lerna.svc.cluster.local:8000
+             - name: ENABLE_K8S_POLLER
+               value: "true"
+             - name: POLL_INTERVAL_SECONDS
+diff --git a/dashboard/src/app/agents/page.tsx b/dashboard/src/app/agents/page.tsx
+index 7f1c74a..1a4e1d0 100644
+--- a/dashboard/src/app/agents/page.tsx
++++ b/dashboard/src/app/agents/page.tsx
+@@ -1,179 +1,371 @@
+-'use client'
++"use client";
+ // src/app/agents/page.tsx
+-import { useCallback, useEffect, useMemo, useState } from 'react'
+-import { motion } from 'framer-motion'
+-import { CircleCheckBig, CircleAlert, Edit3, RotateCcw, Save, X } from 'lucide-react'
+-import { Badge, Button, PageHeader } from '@/components/ui'
+-import { agents, type Agent } from '@/lib/mock-data'
+-import { fetchAgentPrompts, resetAgentPrompt, updateAgentPrompt } from '@/lib/observation-api'
+-import clsx from 'clsx'
+-
+-const statusConfig: Record<Agent['status'], { label: string; dotClass: string; textColor: string }> = {
+-  running:    { label: 'Running',    dotClass: 'bg-lerna-green pulse-green',   textColor: 'text-lerna-green'   },
+-  processing: { label: 'Processing', dotClass: 'bg-lerna-amber pulse-amber',   textColor: 'text-lerna-amber'   },
+-  idle:       { label: 'Idle',       dotClass: 'bg-[#4A5B7A]',                 textColor: 'text-[#4A5B7A]'     },
+-  monitoring: { label: 'Monitoring', dotClass: 'bg-lerna-cyan pulse-blue',     textColor: 'text-lerna-cyan'    },
+-}
++import { useCallback, useEffect, useMemo, useState } from "react";
++import { motion } from "framer-motion";
++import {
++  CircleCheckBig,
++  CircleAlert,
++  Edit3,
++  RotateCcw,
++  Save,
++  X,
++} from "lucide-react";
++import { Badge, Button, PageHeader } from "@/components/ui";
++import { agents, type Agent } from "@/lib/mock-data";
++import {
++  fetchAgentPrompts,
++  fetchAgentWorkflow,
++  fetchLatestAgentWorkflow,
++  resetAgentPrompt,
++  updateAgentPrompt,
++  type AgentWorkflowResponse,
++} from "@/lib/observation-api";
++import clsx from "clsx";
++
++const statusConfig: Record<
++  Agent["status"],
++  { label: string; dotClass: string; textColor: string }
++> = {
++  running: {
++    label: "Running",
++    dotClass: "bg-lerna-green pulse-green",
++    textColor: "text-lerna-green",
++  },
++  processing: {
++    label: "Processing",
++    dotClass: "bg-lerna-amber pulse-amber",
++    textColor: "text-lerna-amber",
++  },
++  idle: {
++    label: "Idle",
++    dotClass: "bg-[#4A5B7A]",
++    textColor: "text-[#4A5B7A]",
++  },
++  monitoring: {
++    label: "Monitoring",
++    dotClass: "bg-lerna-cyan pulse-blue",
++    textColor: "text-lerna-cyan",
++  },
++};
+ 
+ const progressGradient: Record<string, string> = {
+-  filter:     'from-lerna-green to-emerald-400',
+-  diagnosis:  'from-lerna-amber to-orange-400',
+-  planning:   'from-lerna-purple to-lerna-purple2',
+-  executor:   'from-lerna-blue to-lerna-cyan',
+-  validation: 'from-lerna-cyan to-lerna-green',
+-}
++  filter: "from-lerna-green to-emerald-400",
++  diagnosis: "from-lerna-amber to-orange-400",
++  planning: "from-lerna-purple to-lerna-purple2",
++  executor: "from-lerna-blue to-lerna-cyan",
++  validation: "from-lerna-cyan to-lerna-green",
++};
+ 
+ const pipelineSteps = [
+-  { id: 'filter',     label: 'Filter',   color: 'rgba(16,185,129,0.15)',  text: 'text-lerna-green',   border: 'rgba(16,185,129,0.2)'  },
+-  { id: 'diagnosis',  label: 'Diagnose', color: 'rgba(245,158,11,0.15)',  text: 'text-lerna-amber',   border: 'rgba(245,158,11,0.2)'  },
+-  { id: 'planning',   label: 'Plan',     color: 'rgba(168,85,247,0.15)', text: 'text-lerna-purple2', border: 'rgba(168,85,247,0.2)' },
+-  { id: 'executor',   label: 'Execute',  color: 'rgba(59,130,246,0.15)',  text: 'text-lerna-blue2',   border: 'rgba(59,130,246,0.2)'  },
+-  { id: 'validation', label: 'Validate', color: 'rgba(6,182,212,0.15)',   text: 'text-lerna-cyan',    border: 'rgba(6,182,212,0.2)'   },
+-]
++  {
++    id: "filter",
++    label: "Filter",
++    color: "rgba(16,185,129,0.15)",
++    text: "text-lerna-green",
++    border: "rgba(16,185,129,0.2)",
++  },
++  {
++    id: "diagnosis",
++    label: "Diagnose",
++    color: "rgba(245,158,11,0.15)",
++    text: "text-lerna-amber",
++    border: "rgba(245,158,11,0.2)",
++  },
++  {
++    id: "planning",
++    label: "Plan",
++    color: "rgba(168,85,247,0.15)",
++    text: "text-lerna-purple2",
++    border: "rgba(168,85,247,0.2)",
++  },
++  {
++    id: "executor",
++    label: "Execute",
++    color: "rgba(59,130,246,0.15)",
++    text: "text-lerna-blue2",
++    border: "rgba(59,130,246,0.2)",
++  },
++  {
++    id: "validation",
++    label: "Validate",
++    color: "rgba(6,182,212,0.15)",
++    text: "text-lerna-cyan",
++    border: "rgba(6,182,212,0.2)",
++  },
++];
+ 
+ const defaultSystemPrompts: Record<string, string> = {
+-  filter: 'You are the Filter Agent. Validate whether incoming signals represent real service-impacting incidents.',
+-  diagnosis: 'You are the Diagnosis Agent. Analyze telemetry and cluster state to identify likely root cause.',
+-  planning: 'You are the Planning Agent. Propose safe remediation plans with trade-offs and rollback options.',
+-  executor: 'You are the Executor Agent. Apply approved remediations safely with explicit scope control.',
+-  validation: 'You are the Validation Agent. Verify remediation outcomes and close or reopen incidents based on evidence.',
+-}
++  filter:
++    "You are the Filter Agent. Validate whether incoming signals represent real service-impacting incidents.",
++  diagnosis:
++    "You are the Diagnosis Agent. Analyze telemetry and cluster state to identify likely root cause.",
++  planning:
++    "You are the Planning Agent. Propose safe remediation plans with trade-offs and rollback options.",
++  executor:
++    "You are the Executor Agent. Apply approved remediations safely with explicit scope control.",
++  validation:
++    "You are the Validation Agent. Verify remediation outcomes and close or reopen incidents based on evidence.",
++};
+ 
+ export default function AgentsPage() {
+-  const [promptByAgent, setPromptByAgent] = useState<Record<string, string>>({})
+-  const [editingAgentId, setEditingAgentId] = useState<string | null>(null)
+-  const [draftPrompt, setDraftPrompt] = useState('')
+-  const [initialPrompt, setInitialPrompt] = useState('')
+-  const [savingAgentId, setSavingAgentId] = useState<string | null>(null)
+-  const [resettingAgentId, setResettingAgentId] = useState<string | null>(null)
+-  const [loadingPrompts, setLoadingPrompts] = useState(true)
+-  const [notice, setNotice] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
+-  const [error, setError] = useState<string | null>(null)
+-
+-  const agentIds = useMemo(() => agents.map((agent) => agent.id), [])
++  const [promptByAgent, setPromptByAgent] = useState<Record<string, string>>(
++    {},
++  );
++  const [editingAgentId, setEditingAgentId] = useState<string | null>(null);
++  const [draftPrompt, setDraftPrompt] = useState("");
++  const [initialPrompt, setInitialPrompt] = useState("");
++  const [savingAgentId, setSavingAgentId] = useState<string | null>(null);
++  const [resettingAgentId, setResettingAgentId] = useState<string | null>(null);
++  const [loadingPrompts, setLoadingPrompts] = useState(true);
++  const [workflow, setWorkflow] = useState<AgentWorkflowResponse | null>(null);
++  const [loadingWorkflow, setLoadingWorkflow] = useState(true);
++  const [notice, setNotice] = useState<{
++    type: "success" | "error";
++    text: string;
++  } | null>(null);
++  const [error, setError] = useState<string | null>(null);
++
++  const agentIds = useMemo(() => agents.map((agent) => agent.id), []);
+   const agentNameById = useMemo(
+     () => Object.fromEntries(agents.map((agent) => [agent.id, agent.name])),
+-    []
+-  )
++    [],
++  );
+ 
+   useEffect(() => {
+-    let active = true
++    let active = true;
+     const loadPrompts = async () => {
+       try {
+-        const response = await fetchAgentPrompts(agentIds)
+-        if (!active) return
+-        const mapping: Record<string, string> = {}
++        const response = await fetchAgentPrompts(agentIds);
++        if (!active) return;
++        const mapping: Record<string, string> = {};
+         for (const item of response.prompts) {
+-          mapping[item.agent_id] = item.prompt
++          mapping[item.agent_id] = item.prompt;
+         }
+-        setPromptByAgent(mapping)
+-        setNotice(null)
++        setPromptByAgent(mapping);
++        setNotice(null);
+       } catch {
+-        if (!active) return
+-        setError('Unable to load prompts from Redis right now.')
+-        setNotice({ type: 'error', text: 'Using fallback prompts. Redis is currently unreachable.' })
++        if (!active) return;
++        setError("Unable to load prompts from Redis right now.");
++        setNotice({
++          type: "error",
++          text: "Using fallback prompts. Redis is currently unreachable.",
++        });
+       } finally {
+-        if (active) setLoadingPrompts(false)
++        if (active) setLoadingPrompts(false);
+       }
+-    }
+-    loadPrompts()
++    };
++    loadPrompts();
+     return () => {
+-      active = false
+-    }
+-  }, [agentIds])
++      active = false;
++    };
++  }, [agentIds]);
++
++  useEffect(() => {
++    let active = true;
++    const loadWorkflow = async () => {
++      try {
++        const storedWorkflowId =
++          typeof window !== "undefined"
++            ? window.localStorage.getItem("lerna:lastWorkflowId")
++            : null;
++        const workflow = storedWorkflowId
++          ? await fetchAgentWorkflow(storedWorkflowId)
++          : await fetchLatestAgentWorkflow();
++
++        if (!active) return;
++        setWorkflow(workflow);
++      } catch {
++        if (!active) return;
++        setWorkflow(null);
++      } finally {
++        if (active) setLoadingWorkflow(false);
++      }
++    };
++
++    void loadWorkflow();
++    return () => {
++      active = false;
++    };
++  }, []);
+ 
+   const openEditor = (agentId: string) => {
+-    const currentPrompt = promptByAgent[agentId] ?? defaultSystemPrompts[agentId] ?? ''
+-    setEditingAgentId(agentId)
+-    setError(null)
+-    setDraftPrompt(currentPrompt)
+-    setInitialPrompt(currentPrompt)
+-  }
++    const currentPrompt =
++      promptByAgent[agentId] ?? defaultSystemPrompts[agentId] ?? "";
++    setEditingAgentId(agentId);
++    setError(null);
++    setDraftPrompt(currentPrompt);
++    setInitialPrompt(currentPrompt);
++  };
+ 
+   const closeEditor = useCallback(() => {
+-    setEditingAgentId(null)
+-    setDraftPrompt('')
+-    setInitialPrompt('')
+-  }, [])
++    setEditingAgentId(null);
++    setDraftPrompt("");
++    setInitialPrompt("");
++  }, []);
+ 
+   const savePrompt = useCallback(async () => {
+-    if (!editingAgentId) return
++    if (!editingAgentId) return;
+     try {
+-      setSavingAgentId(editingAgentId)
+-      const updated = await updateAgentPrompt(editingAgentId, draftPrompt)
+-      setPromptByAgent((prev) => ({ ...prev, [updated.agent_id]: updated.prompt }))
+-      setNotice({ type: 'success', text: `Saved prompt for ${agentNameById[editingAgentId] ?? editingAgentId}.` })
+-      closeEditor()
+-      setError(null)
++      setSavingAgentId(editingAgentId);
++      const updated = await updateAgentPrompt(editingAgentId, draftPrompt);
++      setPromptByAgent((prev) => ({
++        ...prev,
++        [updated.agent_id]: updated.prompt,
++      }));
++      setNotice({
++        type: "success",
++        text: `Saved prompt for ${agentNameById[editingAgentId] ?? editingAgentId}.`,
++      });
++      closeEditor();
++      setError(null);
+     } catch {
+-      setError('Failed to save prompt to Redis.')
+-      setNotice({ type: 'error', text: 'Prompt save failed. Check backend and Redis connectivity.' })
++      setError("Failed to save prompt to Redis.");
++      setNotice({
++        type: "error",
++        text: "Prompt save failed. Check backend and Redis connectivity.",
++      });
+     } finally {
+-      setSavingAgentId(null)
++      setSavingAgentId(null);
+     }
+-  }, [editingAgentId, draftPrompt, agentNameById, closeEditor])
++  }, [editingAgentId, draftPrompt, agentNameById, closeEditor]);
+ 
+   const resetPromptToDefault = async () => {
+-    if (!editingAgentId) return
++    if (!editingAgentId) return;
+     try {
+-      setResettingAgentId(editingAgentId)
+-      await resetAgentPrompt(editingAgentId)
++      setResettingAgentId(editingAgentId);
++      await resetAgentPrompt(editingAgentId);
+       setPromptByAgent((prev) => {
+-        const next = { ...prev }
+-        delete next[editingAgentId]
+-        return next
+-      })
+-      setNotice({ type: 'success', text: `Reset prompt for ${agentNameById[editingAgentId] ?? editingAgentId}.` })
+-      closeEditor()
+-      setError(null)
++        const next = { ...prev };
++        delete next[editingAgentId];
++        return next;
++      });
++      setNotice({
++        type: "success",
++        text: `Reset prompt for ${agentNameById[editingAgentId] ?? editingAgentId}.`,
++      });
++      closeEditor();
++      setError(null);
+     } catch {
+-      setError('Failed to reset prompt in Redis.')
+-      setNotice({ type: 'error', text: 'Reset failed. Could not update Redis.' })
++      setError("Failed to reset prompt in Redis.");
++      setNotice({
++        type: "error",
++        text: "Reset failed. Could not update Redis.",
++      });
+     } finally {
+-      setResettingAgentId(null)
++      setResettingAgentId(null);
+     }
+-  }
++  };
+ 
+   const isBusy = Boolean(
+     editingAgentId &&
+-    (savingAgentId === editingAgentId || resettingAgentId === editingAgentId)
+-  )
+-  const normalizedInitial = initialPrompt.trim()
+-  const normalizedDraft = draftPrompt.trim()
+-  const isDirty = editingAgentId ? normalizedDraft !== normalizedInitial : false
+-  const canSave = Boolean(editingAgentId && isDirty && normalizedDraft.length > 0 && !isBusy)
++    (savingAgentId === editingAgentId || resettingAgentId === editingAgentId),
++  );
++  const normalizedInitial = initialPrompt.trim();
++  const normalizedDraft = draftPrompt.trim();
++  const isDirty = editingAgentId
++    ? normalizedDraft !== normalizedInitial
++    : false;
++  const canSave = Boolean(
++    editingAgentId && isDirty && normalizedDraft.length > 0 && !isBusy,
++  );
++
++  const agentWorkflowOverrides = useMemo(() => {
++    if (!workflow) {
++      return {};
++    }
++
++    const stageOrder = [
++      "filter",
++      "matcher",
++      "diagnosis",
++      "planning",
++      "executor",
++      "validation",
++    ];
++    const result = workflow.result as Record<string, any> | undefined;
++    const hasOutput = (stage: string) => Boolean(result?.[stage]?.text);
++    const completedStages = stageOrder.filter((stage) => hasOutput(stage));
++    const nextStage = stageOrder.find((stage) => !hasOutput(stage));
++
++    return Object.fromEntries(
++      ["filter", "diagnosis", "planning", "executor", "validation"].map(
++        (stage, index) => {
++          const stageOutput = result?.[stage]?.text ?? "";
++          const isActive =
++            workflow.status !== "completed" && nextStage === stage;
++          const status = isActive
++            ? "processing"
++            : hasOutput(stage)
++              ? workflow.status === "completed"
++                ? "monitoring"
++                : "running"
++              : "idle";
++          const progress = Math.min(100, Math.round(((index + 1) / 5) * 100));
++          const currentTask = stageOutput
++            ? stageOutput.split(/\n/)[0]
++            : isActive
++              ? `Running ${stage} stage...`
++              : `Waiting for ${stage === "diagnosis" ? "diagnosis" : stage} output`;
++          const lastAction = hasOutput(stage)
++            ? `Last response received from ${stage} agent.`
++            : isActive
++              ? `Currently executing ${stage} logic.`
++              : `Queued behind ${nextStage === stage ? stage : "previous stages"}`;
++
++          return [stage, { status, currentTask, lastAction, progress }];
++        },
++      ),
++    ) as Record<
++      string,
++      {
++        status: Agent["status"];
++        currentTask: string;
++        lastAction: string;
++        progress: number;
++      }
++    >;
++  }, [workflow]);
+ 
+   useEffect(() => {
+     const onKeyDown = (event: KeyboardEvent) => {
+-      if (!editingAgentId) return
+-      if (event.key === 'Escape') closeEditor()
+-      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
+-        event.preventDefault()
++      if (!editingAgentId) return;
++      if (event.key === "Escape") closeEditor();
++      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
++        event.preventDefault();
+         if (canSave) {
+-          void savePrompt()
++          void savePrompt();
+         }
+       }
+-    }
+-    window.addEventListener('keydown', onKeyDown)
+-    return () => window.removeEventListener('keydown', onKeyDown)
+-  }, [editingAgentId, canSave, closeEditor, savePrompt])
++    };
++    window.addEventListener("keydown", onKeyDown);
++    return () => window.removeEventListener("keydown", onKeyDown);
++  }, [editingAgentId, canSave, closeEditor, savePrompt]);
+ 
+   return (
+     <div className="p-7 flex flex-col gap-6">
+-      <PageHeader title="Autonomous Agents" subtitle="Multi-agent remediation pipeline · Prompt tuning enabled">
+-        <Badge variant="green">● 5/5 RUNNING</Badge>
++      <PageHeader
++        title="Autonomous Agents"
++        subtitle="Multi-agent remediation pipeline · Prompt tuning enabled"
++      >
++        <Badge variant="green">
++          ● {workflow ? workflow.status.toUpperCase() : "5/5 RUNNING"}
++        </Badge>
+       </PageHeader>
+ 
+       {notice && (
+         <div
+           className={clsx(
+-            'rounded-lg px-3.5 py-2.5 border text-sm flex items-center gap-2',
+-            notice.type === 'success'
+-              ? 'text-lerna-green bg-[rgba(16,185,129,0.08)] border-[rgba(16,185,129,0.25)]'
+-              : 'text-lerna-red bg-[rgba(239,68,68,0.08)] border-[rgba(239,68,68,0.25)]'
++            "rounded-lg px-3.5 py-2.5 border text-sm flex items-center gap-2",
++            notice.type === "success"
++              ? "text-lerna-green bg-[rgba(16,185,129,0.08)] border-[rgba(16,185,129,0.25)]"
++              : "text-lerna-red bg-[rgba(239,68,68,0.08)] border-[rgba(239,68,68,0.25)]",
+           )}
+         >
+-          {notice.type === 'success' ? <CircleCheckBig size={14} /> : <CircleAlert size={14} />}
++          {notice.type === "success" ? (
++            <CircleCheckBig size={14} />
++          ) : (
++            <CircleAlert size={14} />
++          )}
+           {notice.text}
+         </div>
+       )}
+@@ -185,20 +377,32 @@ export default function AgentsPage() {
+ 
+       {/* Pipeline banner */}
+       <motion.div
+-        initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}
++        initial={{ opacity: 0, y: 12 }}
++        animate={{ opacity: 1, y: 0 }}
++        transition={{ duration: 0.3 }}
+         className="bg-gradient-to-r from-[rgba(59,130,246,0.08)] to-[rgba(168,85,247,0.08)] border border-border rounded-2xl px-5 py-4 flex items-center justify-between gap-4 flex-wrap shadow-[0_12px_28px_rgba(0,0,0,0.18)]"
+       >
+         <div>
+-          <div className="text-[10px] text-[#4A5B7A] font-mono tracking-widest mb-2">PIPELINE STATUS</div>
++          <div className="text-[10px] text-[#4A5B7A] font-mono tracking-widest mb-2">
++            PIPELINE STATUS
++          </div>
+           <div className="flex items-center gap-0 flex-wrap">
+             {pipelineSteps.map((step, i) => (
+               <div key={step.id} className="flex items-center">
+                 <span
+-                  className={clsx('text-[12px] px-3 py-1.5 border font-mono font-semibold', step.text)}
++                  className={clsx(
++                    "text-[12px] px-3 py-1.5 border font-mono font-semibold",
++                    step.text,
++                  )}
+                   style={{
+                     background: step.color,
+                     borderColor: step.border,
+-                    borderRadius: i === 0 ? '6px 0 0 6px' : i === pipelineSteps.length - 1 ? '0 6px 6px 0' : '0',
++                    borderRadius:
++                      i === 0
++                        ? "6px 0 0 6px"
++                        : i === pipelineSteps.length - 1
++                          ? "0 6px 6px 0"
++                          : "0",
+                   }}
+                 >
+                   {step.label}
+@@ -211,15 +415,42 @@ export default function AgentsPage() {
+           </div>
+         </div>
+         <div className="text-[13px] text-[#8A9BBB]">
+-          Processing <strong className="text-white">INC-2024-0891</strong>
++          {workflow ? (
++            <>
++              Workflow{" "}
++              <strong className="text-white">{workflow.workflow_id}</strong> ·
++              Incident{" "}
++              <strong className="text-white">{workflow.incident_id}</strong>
++            </>
++          ) : (
++            <>
++              Processing <strong className="text-white">INC-2024-0891</strong>
++            </>
++          )}
+         </div>
+       </motion.div>
+ 
++      {workflow && (
++        <div className="bg-bg-3 border border-border rounded-2xl px-5 py-4 text-sm text-[#E8EDF5]">
++          <div className="font-semibold mb-1">Live workflow attached</div>
++          <div className="text-[#8A9BBB]">
++            Status: <span className="text-white">{workflow.status}</span>
++            {workflow.started_at ? ` · started ${workflow.started_at}` : ""}
++            {workflow.finished_at ? ` · finished ${workflow.finished_at}` : ""}
++          </div>
++        </div>
++      )}
++
+       {/* Agent Cards */}
+       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+         {agents.map((agent, i) => {
+-          const status = statusConfig[agent.status]
+-          const isActive = agent.status === 'processing'
++          const override = agentWorkflowOverrides[agent.id];
++          const displayStatus = override?.status ?? agent.status;
++          const status = statusConfig[displayStatus];
++          const isActive = displayStatus === "processing";
++          const currentTask = override?.currentTask ?? agent.currentTask;
++          const lastAction = override?.lastAction ?? agent.lastAction;
++          const progress = override?.progress ?? agent.progress;
+ 
+           return (
+             <motion.div
+@@ -229,8 +460,10 @@ export default function AgentsPage() {
+               transition={{ delay: i * 0.08, duration: 0.35 }}
+               whileHover={{ y: -2 }}
+               className={clsx(
+-                'bg-bg-2 border rounded-2xl p-6 transition-all duration-200 shadow-[0_10px_26px_rgba(0,0,0,0.2)]',
+-                isActive ? 'border-[rgba(59,130,246,0.4)]' : 'border-border hover:border-border-2'
++                "bg-bg-2 border rounded-2xl p-6 transition-all duration-200 shadow-[0_10px_26px_rgba(0,0,0,0.2)]",
++                isActive
++                  ? "border-[rgba(59,130,246,0.4)]"
++                  : "border-border hover:border-border-2",
+               )}
+             >
+               {/* Header */}
+@@ -242,24 +475,38 @@ export default function AgentsPage() {
+                   {agent.emoji}
+                 </div>
+                 <div className="flex items-center gap-2 font-mono text-[11px]">
+-                  <span className={clsx('w-2 h-2 rounded-full shrink-0', status.dotClass)} />
++                  <span
++                    className={clsx(
++                      "w-2 h-2 rounded-full shrink-0",
++                      status.dotClass,
++                    )}
++                  />
+                   <span className={status.textColor}>{status.label}</span>
+                 </div>
+               </div>
+ 
+               {/* Name */}
+               <div className="font-bold text-[15px] mb-0.5">{agent.name}</div>
+-              <div className="text-[11px] text-[#4A5B7A] font-mono mb-4">{agent.role}</div>
++              <div className="text-[11px] text-[#4A5B7A] font-mono mb-4">
++                {agent.role}
++              </div>
+ 
+               {/* Info rows */}
+               <div className="space-y-0">
+                 <div className="flex justify-between py-2 border-b border-white/[0.04] text-[12px]">
+                   <span className="text-[#4A5B7A]">Current Task</span>
+-                  <span className="font-mono text-[11px] text-right">{agent.currentTask}</span>
++                  <span className="font-mono text-[11px] text-right">
++                    {currentTask}
++                  </span>
+                 </div>
+                 <div className="flex justify-between py-2 border-b border-white/[0.04] text-[12px]">
+                   <span className="text-[#4A5B7A]">Last Action</span>
+-                  <span className="text-[11px] text-right" style={{ color: agent.accentColor }}>{agent.lastAction}</span>
++                  <span
++                    className="text-[11px] text-right"
++                    style={{ color: agent.accentColor }}
++                  >
++                    {lastAction}
++                  </span>
+                 </div>
+                 <div className="flex justify-between py-2 text-[12px]">
+                   <span className="text-[#4A5B7A]">{agent.metricLabel}</span>
+@@ -271,29 +518,47 @@ export default function AgentsPage() {
+               <div className="mt-4 h-[3px] bg-bg-4 rounded-full overflow-hidden">
+                 <motion.div
+                   initial={{ width: 0 }}
+-                  animate={{ width: `${agent.progress}%` }}
+-                  transition={{ delay: i * 0.08 + 0.3, duration: 0.6, ease: 'easeOut' }}
+-                  className={clsx('h-full rounded-full bg-gradient-to-r', progressGradient[agent.id])}
++                  animate={{ width: `${progress}%` }}
++                  transition={{
++                    delay: i * 0.08 + 0.3,
++                    duration: 0.6,
++                    ease: "easeOut",
++                  }}
++                  className={clsx(
++                    "h-full rounded-full bg-gradient-to-r",
++                    progressGradient[agent.id],
++                  )}
+                 />
+               </div>
+ 
+               <div className="mt-4 pt-3 border-t border-white/[0.04]">
+-                <div className="text-[10px] text-[#4A5B7A] font-mono mb-2">SYSTEM PROMPT</div>
++                <div className="text-[10px] text-[#4A5B7A] font-mono mb-2">
++                  SYSTEM PROMPT
++                </div>
+                 <div className="text-[12px] text-[#8A9BBB] leading-relaxed line-clamp-3 min-h-[42px] bg-bg-3/50 border border-white/[0.04] rounded-lg px-2.5 py-2">
+-                  {loadingPrompts ? 'Loading prompt...' : (promptByAgent[agent.id] ?? defaultSystemPrompts[agent.id])}
++                  {loadingPrompts
++                    ? "Loading prompt..."
++                    : (promptByAgent[agent.id] ??
++                      defaultSystemPrompts[agent.id])}
+                 </div>
+                 <div className="mt-3 flex items-center justify-between gap-2">
+                   <span className="text-[10px] text-[#4A5B7A] font-mono">
+-                    {promptByAgent[agent.id] ? 'Custom prompt' : 'Default prompt'}
++                    {promptByAgent[agent.id]
++                      ? "Custom prompt"
++                      : "Default prompt"}
+                   </span>
+-                  <Button variant="outline" className="text-[11px] px-3 py-1.5" onClick={() => openEditor(agent.id)}>
++                  <Button
++                    variant="outline"
++                    className="text-[11px] px-3 py-1.5"
++                    onClick={() => openEditor(agent.id)}
++                  >
+                     <Edit3 size={12} />
+                     Edit Prompt
+                   </Button>
+                 </div>
+               </div>
+             </motion.div>
+-          )
++          );
+         })}
+       </div>
+ 
+@@ -302,7 +567,7 @@ export default function AgentsPage() {
+           <motion.div
+             initial={{ opacity: 0, y: 18, scale: 0.98 }}
+             animate={{ opacity: 1, y: 0, scale: 1 }}
+-            transition={{ duration: 0.22, ease: 'easeOut' }}
++            transition={{ duration: 0.22, ease: "easeOut" }}
+             className="w-full max-w-2xl bg-bg-2 border border-border rounded-2xl p-5 shadow-[0_24px_60px_rgba(0,0,0,0.45)]"
+           >
+             <div className="flex items-start justify-between gap-4 mb-4">
+@@ -312,7 +577,11 @@ export default function AgentsPage() {
+                   {agentNameById[editingAgentId] ?? editingAgentId}
+                 </div>
+               </div>
+-              <Button variant="ghost" className="px-2.5 py-1.5" onClick={closeEditor}>
++              <Button
++                variant="ghost"
++                className="px-2.5 py-1.5"
++                onClick={closeEditor}
++              >
+                 <X size={14} />
+               </Button>
+             </div>
+@@ -325,29 +594,36 @@ export default function AgentsPage() {
+             />
+             <div className="mt-2 flex items-center justify-between text-[11px] text-[#4A5B7A] font-mono">
+               <span>{draftPrompt.trim().length} chars</span>
+-              <span>{isDirty ? 'Unsaved changes' : 'No changes'}</span>
++              <span>{isDirty ? "Unsaved changes" : "No changes"}</span>
+             </div>
+ 
+             <div className="mt-4 flex items-center justify-between gap-2 flex-wrap border-t border-white/[0.05] pt-4">
+               <Button
+                 variant="outline"
+                 onClick={resetPromptToDefault}
+-                disabled={resettingAgentId === editingAgentId || savingAgentId === editingAgentId}
++                disabled={
++                  resettingAgentId === editingAgentId ||
++                  savingAgentId === editingAgentId
++                }
+                 className="text-lerna-amber border-lerna-amber/40 hover:border-lerna-amber"
+               >
+                 <RotateCcw size={13} />
+-                {resettingAgentId === editingAgentId ? 'Resetting...' : 'Reset to default'}
++                {resettingAgentId === editingAgentId
++                  ? "Resetting..."
++                  : "Reset to default"}
+               </Button>
+               <div className="flex items-center gap-2 ml-auto">
+-                <Button
+-                  variant="ghost"
+-                  onClick={closeEditor}
+-                >
++                <Button variant="ghost" onClick={closeEditor}>
+                   Cancel
+                 </Button>
+-                <Button variant="primary" onClick={savePrompt} className="min-w-[90px]" disabled={!canSave}>
++                <Button
++                  variant="primary"
++                  onClick={savePrompt}
++                  className="min-w-[90px]"
++                  disabled={!canSave}
++                >
+                   <Save size={13} />
+-                  {savingAgentId === editingAgentId ? 'Saving...' : 'Save'}
++                  {savingAgentId === editingAgentId ? "Saving..." : "Save"}
+                 </Button>
+               </div>
+             </div>
+@@ -355,5 +631,5 @@ export default function AgentsPage() {
+         </div>
+       )}
+     </div>
+-  )
+-}
+\ No newline at end of file
++  );
++}
+diff --git a/dashboard/src/app/chat/page.tsx b/dashboard/src/app/chat/page.tsx
+index 08b3fc3..335ffb4 100644
+--- a/dashboard/src/app/chat/page.tsx
++++ b/dashboard/src/app/chat/page.tsx
+@@ -1,97 +1,140 @@
+-'use client'
++"use client";
+ // src/app/chat/page.tsx
+-import { useState, useRef, useEffect } from 'react'
+-import { motion, AnimatePresence } from 'framer-motion'
+-import { Send } from 'lucide-react'
+-import { Badge, PageHeader } from '@/components/ui'
+-import { initialChatMessages, cannedResponses, type ChatMessage } from '@/lib/mock-data'
+-import clsx from 'clsx'
++import { useState, useRef, useEffect } from "react";
++import { motion, AnimatePresence } from "framer-motion";
++import { Send } from "lucide-react";
++import { Badge, PageHeader } from "@/components/ui";
++import { chatWithOrchestrator } from "@/lib/observation-api";
++import {
++  initialChatMessages,
++  cannedResponses,
++  type ChatMessage,
++} from "@/lib/mock-data";
++import clsx from "clsx";
+ 
+ function renderContent(text: string) {
+   // Bold: **text**, Code: `text`
+-  const parts = text.split(/(\*\*.*?\*\*|`.*?`)/g)
++  const parts = text.split(/(\*\*.*?\*\*|`.*?`)/g);
+   return parts.map((part, i) => {
+-    if (part.startsWith('**') && part.endsWith('**')) {
+-      return <strong key={i} className="text-white font-bold">{part.slice(2, -2)}</strong>
++    if (part.startsWith("**") && part.endsWith("**")) {
++      return (
++        <strong key={i} className="text-white font-bold">
++          {part.slice(2, -2)}
++        </strong>
++      );
+     }
+-    if (part.startsWith('`') && part.endsWith('`')) {
++    if (part.startsWith("`") && part.endsWith("`")) {
+       return (
+-        <code key={i} className="bg-white/10 px-1.5 py-0.5 rounded text-[11px] font-mono text-lerna-blue2">
++        <code
++          key={i}
++          className="bg-white/10 px-1.5 py-0.5 rounded text-[11px] font-mono text-lerna-blue2"
++        >
+           {part.slice(1, -1)}
+         </code>
+-      )
++      );
+     }
+     // Render newlines
+-    return part.split('\n').map((line, j, arr) => (
++    return part.split("\n").map((line, j, arr) => (
+       <span key={`${i}-${j}`}>
+         {line}
+         {j < arr.length - 1 && <br />}
+       </span>
+-    ))
+-  })
++    ));
++  });
+ }
+ 
+ const quickActions = [
+-  'Apply fix to production',
+-  'Show all active incidents',
+-  'What is the cluster health?',
+-  'Run sandbox simulation',
+-]
++  "Apply fix to production",
++  "Show all active incidents",
++  "What is the cluster health?",
++  "Run sandbox simulation",
++];
+ 
+ export default function ChatPage() {
+-  const [messages, setMessages] = useState<ChatMessage[]>(initialChatMessages)
+-  const [input, setInput] = useState('')
+-  const [isTyping, setIsTyping] = useState(false)
+-  const bottomRef = useRef<HTMLDivElement>(null)
+-  const textareaRef = useRef<HTMLTextAreaElement>(null)
+-  const cannedIdx = useRef(0)
++  const [messages, setMessages] = useState<ChatMessage[]>(initialChatMessages);
++  const [input, setInput] = useState("");
++  const [isTyping, setIsTyping] = useState(false);
++  const bottomRef = useRef<HTMLDivElement>(null);
++  const textareaRef = useRef<HTMLTextAreaElement>(null);
++  const cannedIdx = useRef(0);
+ 
+   useEffect(() => {
+-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+-  }, [messages, isTyping])
++    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
++  }, [messages, isTyping]);
+ 
+   function now() {
+-    const d = new Date()
+-    return `${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')}`
++    const d = new Date();
++    return `${d.getHours()}:${String(d.getMinutes()).padStart(2, "0")}:${String(d.getSeconds()).padStart(2, "0")}`;
+   }
+ 
+   async function send(text: string) {
+-    if (!text.trim()) return
+-    setInput('')
++    if (!text.trim()) return;
++    setInput("");
+     if (textareaRef.current) {
+-      textareaRef.current.style.height = 'auto'
++      textareaRef.current.style.height = "auto";
+     }
+ 
+-    const userMsg: ChatMessage = { id: Date.now().toString(), role: 'user', content: text.trim(), timestamp: now() }
+-    setMessages(prev => [...prev, userMsg])
+-    setIsTyping(true)
+-
+-    await new Promise(r => setTimeout(r, 1500 + Math.random() * 800))
++    const userMsg: ChatMessage = {
++      id: Date.now().toString(),
++      role: "user",
++      content: text.trim(),
++      timestamp: now(),
++    };
++    setMessages((prev) => [...prev, userMsg]);
++    setIsTyping(true);
+ 
+-    const reply = cannedResponses[cannedIdx.current % cannedResponses.length]
+-    cannedIdx.current++
+-    const assistantMsg: ChatMessage = { id: (Date.now() + 1).toString(), role: 'assistant', content: reply, timestamp: now() }
+-    setMessages(prev => [...prev, assistantMsg])
+-    setIsTyping(false)
++    try {
++      const response = await chatWithOrchestrator(text.trim());
++      if (response.workflow_id) {
++        window.localStorage.setItem(
++          "lerna:lastWorkflowId",
++          response.workflow_id,
++        );
++      }
++      const assistantMsg: ChatMessage = {
++        id: (Date.now() + 1).toString(),
++        role: "assistant",
++        content: response.message,
++        timestamp: now(),
++      };
++      setMessages((prev) => [...prev, assistantMsg]);
++    } catch (error) {
++      const fallback =
++        cannedResponses[cannedIdx.current % cannedResponses.length];
++      cannedIdx.current += 1;
++      const assistantMsg: ChatMessage = {
++        id: (Date.now() + 1).toString(),
++        role: "assistant",
++        content: fallback,
++        timestamp: now(),
++      };
++      setMessages((prev) => [...prev, assistantMsg]);
++      console.error("Orchestrator chat failed:", error);
++    } finally {
++      setIsTyping(false);
++    }
+   }
+ 
+   function handleKey(e: React.KeyboardEvent) {
+-    if (e.key === 'Enter' && !e.shiftKey) {
+-      e.preventDefault()
+-      send(input)
++    if (e.key === "Enter" && !e.shiftKey) {
++      e.preventDefault();
++      send(input);
+     }
+   }
+ 
+   function autoResize(e: React.ChangeEvent<HTMLTextAreaElement>) {
+-    setInput(e.target.value)
+-    e.target.style.height = 'auto'
+-    e.target.style.height = Math.min(e.target.scrollHeight, 120) + 'px'
++    setInput(e.target.value);
++    e.target.style.height = "auto";
++    e.target.style.height = Math.min(e.target.scrollHeight, 120) + "px";
+   }
+ 
+   return (
+     <div className="p-7 flex flex-col h-screen">
+       <div className="mb-5">
+-        <PageHeader title="Lerna AI Chat" subtitle="Natural language interface to the SRE pipeline">
++        <PageHeader
++          title="Lerna AI Chat"
++          subtitle="Natural language interface to the SRE pipeline"
++        >
+           <Badge variant="purple">● GPT-4 Turbo</Badge>
+         </PageHeader>
+       </div>
+@@ -104,29 +147,38 @@ export default function ChatPage() {
+             initial={{ opacity: 0, y: 10 }}
+             animate={{ opacity: 1, y: 0 }}
+             transition={{ duration: 0.25 }}
+-            className={clsx('flex gap-3 max-w-[85%]', msg.role === 'user' && 'flex-row-reverse ml-auto')}
++            className={clsx(
++              "flex gap-3 max-w-[85%]",
++              msg.role === "user" && "flex-row-reverse ml-auto",
++            )}
+           >
+-            <div className={clsx(
+-              'w-8 h-8 rounded-xl flex items-center justify-center text-[13px] font-bold shrink-0',
+-              msg.role === 'assistant'
+-                ? 'bg-gradient-to-br from-lerna-blue to-lerna-purple text-white'
+-                : 'bg-bg-4 text-[#8A9BBB]'
+-            )}>
+-              {msg.role === 'assistant' ? 'L' : 'U'}
++            <div
++              className={clsx(
++                "w-8 h-8 rounded-xl flex items-center justify-center text-[13px] font-bold shrink-0",
++                msg.role === "assistant"
++                  ? "bg-gradient-to-br from-lerna-blue to-lerna-purple text-white"
++                  : "bg-bg-4 text-[#8A9BBB]",
++              )}
++            >
++              {msg.role === "assistant" ? "L" : "U"}
+             </div>
+             <div>
+-              <div className={clsx(
+-                'px-4 py-3 rounded-2xl text-[13px] leading-relaxed',
+-                msg.role === 'assistant'
+-                  ? 'bg-bg-3 border border-border rounded-tl-sm'
+-                  : 'bg-gradient-to-br from-lerna-blue to-lerna-purple text-white rounded-tr-sm'
+-              )}>
++              <div
++                className={clsx(
++                  "px-4 py-3 rounded-2xl text-[13px] leading-relaxed",
++                  msg.role === "assistant"
++                    ? "bg-bg-3 border border-border rounded-tl-sm"
++                    : "bg-gradient-to-br from-lerna-blue to-lerna-purple text-white rounded-tr-sm",
++                )}
++              >
+                 {renderContent(msg.content)}
+               </div>
+-              <div className={clsx(
+-                'text-[10px] text-[#4A5B7A] font-mono mt-1 px-1',
+-                msg.role === 'user' && 'text-right'
+-              )}>
++              <div
++                className={clsx(
++                  "text-[10px] text-[#4A5B7A] font-mono mt-1 px-1",
++                  msg.role === "user" && "text-right",
++                )}
++              >
+                 {msg.timestamp}
+               </div>
+             </div>
+@@ -147,8 +199,11 @@ export default function ChatPage() {
+               </div>
+               <div className="bg-bg-3 border border-border rounded-2xl rounded-tl-sm px-4 py-3">
+                 <div className="flex gap-1.5 items-center">
+-                  {[0,1,2].map(i => (
+-                    <span key={i} className={`typing-dot w-1.5 h-1.5 rounded-full bg-[#4A5B7A]`} />
++                  {[0, 1, 2].map((i) => (
++                    <span
++                      key={i}
++                      className={`typing-dot w-1.5 h-1.5 rounded-full bg-[#4A5B7A]`}
++                    />
+                   ))}
+                 </div>
+               </div>
+@@ -162,7 +217,7 @@ export default function ChatPage() {
+       <div className="border-t border-border pt-4 shrink-0">
+         {/* Quick actions */}
+         <div className="flex gap-2 mb-3 flex-wrap">
+-          {quickActions.map(action => (
++          {quickActions.map((action) => (
+             <button
+               key={action}
+               onClick={() => send(action)}
+@@ -197,5 +252,5 @@ export default function ChatPage() {
+         </div>
+       </div>
+     </div>
+-  )
+-}
+\ No newline at end of file
++  );
++}
+diff --git a/dashboard/src/lib/observation-api.ts b/dashboard/src/lib/observation-api.ts
+index bc84f93..f59f0ae 100644
+--- a/dashboard/src/lib/observation-api.ts
++++ b/dashboard/src/lib/observation-api.ts
+@@ -87,6 +87,21 @@ export interface AgentPromptResetResponse {
+   reset: boolean
+ }
+ 
++export interface AgentWorkflowResponse {
++  workflow_id: string
++  incident_id: string
++  status: string
++  accepted_at: string
++  started_at?: string | null
++  finished_at?: string | null
++  result?: Record<string, any>
++}
++
++export interface AgentChatResponse {
++  message: string
++  workflow_id?: string
++}
++
+ export async function fetchClusterHealth() {
+   return request<ClusterHealthResponse>('/cluster/health')
+ }
+@@ -118,3 +133,19 @@ export async function resetAgentPrompt(agentId: string) {
+     method: 'DELETE',
+   })
+ }
++
++export async function fetchLatestAgentWorkflow() {
++  return request<AgentWorkflowResponse>(`/agents/workflows/latest`)
++}
++
++export async function fetchAgentWorkflow(workflowId: string) {
++  return request<AgentWorkflowResponse>(`/agents/workflows/${encodeURIComponent(workflowId)}`)
++}
++
++export async function chatWithOrchestrator(message: string, workflowId?: string, incidentId?: string) {
++  return request<AgentChatResponse>(`/agents/orchestrator/chat`, {
++    method: 'POST',
++    headers: { 'Content-Type': 'application/json' },
++    body: JSON.stringify({ message, workflow_id: workflowId, incident_id: incidentId }),
++  })
++}

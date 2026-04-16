@@ -87,6 +87,21 @@ export interface AgentPromptResetResponse {
   reset: boolean
 }
 
+export interface AgentWorkflowResponse {
+  workflow_id: string
+  incident_id: string
+  status: string
+  accepted_at: string
+  started_at?: string | null
+  finished_at?: string | null
+  result?: Record<string, any>
+}
+
+export interface AgentChatResponse {
+  message: string
+  workflow_id?: string
+}
+
 export async function fetchClusterHealth() {
   return request<ClusterHealthResponse>('/cluster/health')
 }
@@ -116,5 +131,21 @@ export async function updateAgentPrompt(agentId: string, prompt: string) {
 export async function resetAgentPrompt(agentId: string) {
   return request<AgentPromptResetResponse>(`/agents/prompts/${encodeURIComponent(agentId)}`, {
     method: 'DELETE',
+  })
+}
+
+export async function fetchLatestAgentWorkflow() {
+  return request<AgentWorkflowResponse>(`/agents/workflows/latest`)
+}
+
+export async function fetchAgentWorkflow(workflowId: string) {
+  return request<AgentWorkflowResponse>(`/agents/workflows/${encodeURIComponent(workflowId)}`)
+}
+
+export async function chatWithOrchestrator(message: string, workflowId?: string, incidentId?: string) {
+  return request<AgentChatResponse>(`/agents/orchestrator/chat`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ message, workflow_id: workflowId, incident_id: incidentId }),
   })
 }
