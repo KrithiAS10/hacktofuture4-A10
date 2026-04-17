@@ -4,8 +4,7 @@ import { useState, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Send } from "lucide-react";
 import { Badge, PageHeader } from "@/components/ui";
-import { chatWithOrchestrator } from "@/lib/observation-api";
-import type { ChatMessage } from "@/lib/mock-data";
+import { chatWithOrchestrator, type ChatMessage } from "@/lib/observation-api";
 import clsx from "clsx";
 
 function renderContent(text: string) {

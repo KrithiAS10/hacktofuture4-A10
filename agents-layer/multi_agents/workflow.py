@@ -103,9 +103,36 @@ def _extract_tool_calls(output: Any) -> list[dict[str, str]]:
 
 def _run_agent(agent: Any, prompt: str) -> dict[str, Any]:
     result = agent.invoke({"messages": [{"role": "user", "content": prompt}]})
+    usage = result.get("usage") if isinstance(result, dict) else {}
+    if not isinstance(usage, dict):
+        usage = {}
     return {
         "text": _extract_text_from_agent_output(result),
         "tool_calls": _extract_tool_calls(result),
+        "usage": usage,
+    }
+
+
+def _aggregate_langgraph_api_usage(outputs: dict[str, Any]) -> dict[str, Any]:
+    prompt_tokens = 0
+    completion_tokens = 0
+    cost_usd = 0.0
+    model = ""
+    for key in ("filter", "matcher", "diagnosis", "planning", "executor", "validation"):
+        stage = outputs.get(key)
+        if not isinstance(stage, dict):
+            continue
+        u = stage.get("usage") or {}
+        prompt_tokens += int(u.get("prompt_tokens") or 0)
+        completion_tokens += int(u.get("completion_tokens") or 0)
+        cost_usd += float(u.get("cost_usd") or 0.0)
+        if u.get("model"):
+            model = str(u["model"])
+    return {
+        "prompt_tokens": prompt_tokens,
+        "completion_tokens": completion_tokens,
+        "cost_usd": round(cost_usd, 6),
+        "model": model,
     }
 
 
@@ -238,4 +265,5 @@ def run_langgraph_workflow(
     if on_stage_complete:
         on_stage_complete("validation", outputs["validation"])
 
+    outputs["api_usage"] = _aggregate_langgraph_api_usage(outputs)
     return outputs

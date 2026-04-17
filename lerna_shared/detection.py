@@ -42,7 +42,11 @@ class DetectionIncident(BaseModel):
     incident_class: str
     dominant_signature: str
     correlation: Dict[str, int] = Field(default_factory=dict)
-    cost: float = Field(default=1.0, ge=0)
+    cost: float = Field(
+        default=0.0,
+        ge=0,
+        description="Optional client hint; agents service bills from measured LLM usage at workflow completion.",
+    )
 
 
 class DetectionRunResult(BaseModel):
@@ -177,17 +181,6 @@ def _incident_severity(error_count: int) -> str:
     return "warning"
 
 
-def _incident_cost(error_count: int, warning_count: int) -> float:
-    # Lightweight heuristic until runtime pricing is wired in from model usage telemetry.
-    if error_count >= 5:
-        return 8.0
-    if error_count >= 1:
-        return 5.0
-    if warning_count >= 5:
-        return 2.5
-    return 1.0
-
-
 def fingerprint_incident(service: str, namespace: str, incident_class: str, dominant_signature: str) -> str:
     raw = "::".join([service, namespace, incident_class, dominant_signature])
     return hashlib.sha1(raw.encode("utf-8")).hexdigest()
@@ -248,6 +241,6 @@ def build_detection_run_result(
         incident_class=incident_class,
         dominant_signature=dominant_signature,
         correlation=correlated,
-        cost=_incident_cost(error_count, warning_count),
+        cost=0.0,
     )
     return DetectionRunResult(check=check, incident=incident)

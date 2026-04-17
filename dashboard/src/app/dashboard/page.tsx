@@ -1,6 +1,6 @@
 'use client'
 // src/app/dashboard/page.tsx
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { motion } from 'framer-motion'
 import { Activity, AlertTriangle, Bot, ChevronRight, Radio, Server } from 'lucide-react'
 import Link from 'next/link'
@@ -12,7 +12,7 @@ import {
   type ClusterHealthResponse,
   type ClusterSummaryResponse,
 } from '@/lib/observation-api'
-import { incidents as mockIncidents } from '@/lib/mock-data'
+import { useWorkflows } from '@/context/WorkflowsContext'
 import clsx from 'clsx'
 
 const container = {
@@ -40,41 +40,6 @@ const timeLabels = [
 ]
 const latencyData = [120, 125, 118, 130, 142, 155, 160, 142, 148, 139, 135, 142]
 
-const recentEvents: UiEvent[] = [
-  {
-    id: 'evt-1',
-    severity: 'red' as const,
-    label: 'Critical',
-    service: 'payment-service',
-    desc: 'High error rate detected (5.2% → 18.7%)',
-    time: '2m ago',
-  },
-  {
-    id: 'evt-2',
-    severity: 'amber' as const,
-    label: 'Warning',
-    service: 'api-gateway',
-    desc: 'P95 latency spike (180ms → 450ms)',
-    time: '14m ago',
-  },
-  {
-    id: 'evt-3',
-    severity: 'green' as const,
-    label: 'Resolved',
-    service: 'auth-service',
-    desc: 'Memory leak patched by Executor Agent',
-    time: '38m ago',
-  },
-  {
-    id: 'evt-4',
-    severity: 'blue' as const,
-    label: 'Info',
-    service: 'user-service',
-    desc: 'Auto-scaling triggered — added 4 replicas',
-    time: '52m ago',
-  },
-]
-
 type UiEvent = {
   id: string
   severity: 'red' | 'amber' | 'green' | 'blue'
@@ -84,16 +49,78 @@ type UiEvent = {
   time: string
 }
 
+function formatRelativeTime(iso?: string): string {
+  if (!iso) return '—'
+  const t = new Date(iso).getTime()
+  if (Number.isNaN(t)) return iso
+  const diffMs = Date.now() - t
+  const sec = Math.floor(diffMs / 1000)
+  if (sec < 45) return 'just now'
+  const min = Math.floor(sec / 60)
+  if (min < 60) return `${min}m ago`
+  const hr = Math.floor(min / 60)
+  if (hr < 48) return `${hr}h ago`
+  return new Date(iso).toLocaleString()
+}
+
+function k8sRecentEventToUi(
+  ev: NonNullable<ClusterSummaryResponse['recent_events']>[number],
+  idx: number,
+): UiEvent {
+  const type = (ev.type ?? '').toLowerCase()
+  const reason = ev.reason ?? ''
+  const msg = ev.message ?? ''
+  const combined = `${reason} ${msg}`
+  const looksSevere = /fail|error|backoff|unhealthy|evicted|oom/i.test(combined)
+  const looksPositive = /pull|success|scheduled|started|created|completed|killing/i.test(reason)
+
+  let severity: UiEvent['severity'] = 'blue'
+  let label = 'Event'
+  if (type === 'warning' && looksSevere) {
+    severity = 'red'
+    label = 'Critical'
+  } else if (type === 'warning') {
+    severity = 'amber'
+    label = 'Warning'
+  } else if (looksPositive) {
+    severity = 'green'
+    label = 'Normal'
+  } else {
+    label = type === 'normal' ? 'Normal' : 'Info'
+  }
+
+  const ns = ev.namespace ?? '—'
+  const obj = ev.object ?? 'resource'
+  const service = `${ns} / ${obj}`
+  const desc = [reason, msg].filter(Boolean).join(' — ') || 'Kubernetes event'
+
+  return {
+    id: `evt-${idx}-${ev.last_timestamp ?? reason}`,
+    severity,
+    label,
+    service,
+    desc,
+    time: formatRelativeTime(ev.last_timestamp),
+  }
+}
+
 function Skeleton({ className }: { className?: string }) {
   return <div className={clsx('animate-pulse rounded-md bg-bg-4/80', className)} />
 }
 
 export default function DashboardPage() {
+  const { openCount: openWorkflowCount } = useWorkflows()
   const [loading, setLoading] = useState(true)
   const [clusterHealth, setClusterHealth] = useState<ClusterHealthResponse | null>(null)
   const [clusterSummary, setClusterSummary] = useState<ClusterSummaryResponse | null>(null)
   const [cpuHistory, setCpuHistory] = useState<number[]>([])
   const [memHistory, setMemHistory] = useState<number[]>([])
+
+  const recentEvents = useMemo(() => {
+    const raw = clusterSummary?.recent_events
+    if (!raw?.length) return []
+    return raw.slice(0, 12).map((ev, i) => k8sRecentEventToUi(ev, i))
+  }, [clusterSummary])
 
   useEffect(() => {
     let active = true
@@ -134,7 +161,7 @@ export default function DashboardPage() {
   const servicesTotal = clusterHealth?.services?.total ?? 0
   const servicesDown = clusterHealth?.services?.without_ready_endpoints_count ?? 0
   const score = clusterHealth?.score_hint ?? 0
-  const activeIncidents = mockIncidents.filter((i) => i.status !== 'resolved').length
+  const activeIncidents = openWorkflowCount
   const cpuValue = clusterSummary?.metrics?.cpu_percentage
   const memValue = clusterSummary?.metrics?.memory_percentage
   const cpuAvailable = clusterSummary?.metrics?.cpu_available ?? false
@@ -203,7 +230,7 @@ export default function DashboardPage() {
             <StatCard
               label="Active incidents"
               value={`${activeIncidents}`}
-              sub="From mock queue · wire to live incidents when ready"
+              sub="Open agent workflows (status ≠ completed), polled every 30s"
               valueColor="text-lerna-red"
               icon={<AlertTriangle size={18} className="text-lerna-red" />}
               iconBg="bg-[rgba(239,68,68,0.12)]"
@@ -339,7 +366,9 @@ export default function DashboardPage() {
           <div className="flex items-end justify-between gap-3">
             <div>
               <h2 className="font-display text-sm font-semibold text-white">Recent activity</h2>
-              <p className="mt-0.5 text-[12px] text-[#6b7c9e]">Representative stream · connect to Loki / events next</p>
+              <p className="mt-0.5 text-[12px] text-[#6b7c9e]">
+                Latest Kubernetes events from the observation poller (empty if none returned)
+              </p>
             </div>
             <Link
               href="/incidents"
@@ -360,26 +389,33 @@ export default function DashboardPage() {
               <span className="text-right">Time</span>
             </div>
             <ul className="divide-y divide-border/60">
-              {recentEvents.map((e, i) => (
-                <motion.li
-                  key={e.id}
-                  initial={{ opacity: 0, x: -6 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  transition={{ delay: 0.08 + i * 0.04 }}
-                  className="px-4 py-3.5 transition-colors hover:bg-bg-4/30"
-                >
-                  <div className="flex flex-col gap-2 md:grid md:grid-cols-[minmax(0,88px)_minmax(0,1fr)_auto] md:items-center md:gap-3">
-                    <Badge variant={e.severity} className="w-fit text-[10px]">
-                      {e.label}
-                    </Badge>
-                    <div className="min-w-0">
-                      <div className="font-mono text-[11px] text-[#6b7c9e]">{e.service}</div>
-                      <p className="mt-0.5 text-[13px] leading-snug text-[#e2e8f4]">{e.desc}</p>
+              {recentEvents.length === 0 ? (
+                <li className="px-4 py-10 text-center text-[13px] text-[#6b7c9e]">
+                  No recent cluster events yet. When the backend returns `recent_events` on cluster summary, they appear
+                  here.
+                </li>
+              ) : (
+                recentEvents.map((e, i) => (
+                  <motion.li
+                    key={e.id}
+                    initial={{ opacity: 0, x: -6 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    transition={{ delay: 0.08 + i * 0.04 }}
+                    className="px-4 py-3.5 transition-colors hover:bg-bg-4/30"
+                  >
+                    <div className="flex flex-col gap-2 md:grid md:grid-cols-[minmax(0,88px)_minmax(0,1fr)_auto] md:items-center md:gap-3">
+                      <Badge variant={e.severity} className="w-fit text-[10px]">
+                        {e.label}
+                      </Badge>
+                      <div className="min-w-0">
+                        <div className="font-mono text-[11px] text-[#6b7c9e]">{e.service}</div>
+                        <p className="mt-0.5 text-[13px] leading-snug text-[#e2e8f4]">{e.desc}</p>
+                      </div>
+                      <span className="shrink-0 font-mono text-[11px] text-[#5c6d8c] md:text-right">{e.time}</span>
                     </div>
-                    <span className="shrink-0 font-mono text-[11px] text-[#5c6d8c] md:text-right">{e.time}</span>
-                  </div>
-                </motion.li>
-              ))}
+                  </motion.li>
+                ))
+              )}
             </ul>
           </motion.div>
         </div>

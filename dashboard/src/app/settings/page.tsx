@@ -78,7 +78,9 @@ export default function SettingsPage() {
       <div className="bg-bg-2 border border-border rounded-2xl p-6 max-w-2xl">
         <div className="text-[11px] text-[#4A5B7A] font-mono tracking-widest mb-2">DAILY COST LIMIT</div>
         <p className="text-[13px] text-[#8A9BBB] mb-5">
-          When today&apos;s total incident cost reaches this value, agents stop executing new incidents and return an error.
+          Daily cap is stored in the observation backend database and synced to the agents service for enforcement. If no
+          saved value exists yet, the server uses <span className="text-[#E8EDF5]">LERNA_DEFAULT_MAX_DAILY_AGENT_COST_USD</span>{' '}
+          (default 100). When today&apos;s measured API spend reaches the cap, new incidents are rejected.
         </p>
 
         {loading ? (

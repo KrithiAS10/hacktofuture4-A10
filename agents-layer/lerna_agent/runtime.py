@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import datetime, timezone
+from functools import partial
 from typing import Any, Dict
 from uuid import uuid4
 
@@ -11,6 +12,7 @@ logger = logging.getLogger(__name__)
 from lerna_shared.detection import AgentTriggerResponse, DetectionIncident
 
 from .agent import LernaAgent
+from .incident_report import maybe_generate_and_store_incident_report
 from .store import WorkflowStore
 
 
@@ -62,9 +64,36 @@ async def execute_incident_workflow(
     )
     try:
         agent = LernaAgent(model=model)
-        result = await asyncio.to_thread(agent.run, _incident_prompt(incident))
+        outcome = await asyncio.to_thread(agent.run, _incident_prompt(incident))
         workflow["status"] = "completed"
-        workflow["result"] = result
+        workflow["result"] = outcome.text
+        total_usd = float(outcome.cost_usd)
+        workflow["api_usage"] = {
+            "workflow": {
+                "prompt_tokens": outcome.prompt_tokens,
+                "completion_tokens": outcome.completion_tokens,
+                "model": outcome.model,
+                "cost_usd": round(outcome.cost_usd, 6),
+            },
+        }
+        report_bundle = await asyncio.to_thread(
+            partial(
+                maybe_generate_and_store_incident_report,
+                incident,
+                workflow_id,
+                "single",
+                outcome.text,
+                model=model,
+            ),
+        )
+        if report_bundle is not None:
+            workflow["incident_report"] = report_bundle
+            reporter_u = report_bundle.get("api_usage") or {}
+            total_usd += float(reporter_u.get("cost_usd") or 0)
+            workflow["api_usage"]["reporter"] = reporter_u
+        workflow["api_cost_usd"] = round(total_usd, 6)
+        if total_usd > 0:
+            await store.add_daily_spend(total_usd)
         logger.info("Agents: workflow %s completed (incident %s)", workflow_id, incident.incident_id)
     except Exception as exc:  # pylint: disable=broad-except
         workflow["status"] = "failed"

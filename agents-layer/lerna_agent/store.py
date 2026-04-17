@@ -89,7 +89,10 @@ class WorkflowStore:
         except (TypeError, ValueError):
             return None
 
-    async def set_max_daily_cost(self, amount: float) -> None:
+    async def set_max_daily_cost(self, amount: Optional[float]) -> None:
+        if amount is None:
+            await self._redis.hdel(COST_SETTINGS_KEY, "max_daily_cost")
+            return
         await self._redis.hset(COST_SETTINGS_KEY, mapping={"max_daily_cost": amount})
 
     @staticmethod

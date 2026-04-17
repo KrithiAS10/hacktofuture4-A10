@@ -184,7 +184,8 @@ def openai_tools() -> List[Dict[str, Any]]:
         ),
         (
             "get_pod_logs",
-            "Read container logs from kubelet (not Loki).",
+            "Read container logs from kubelet (not Loki). Retries on 404 for short races. "
+            "If the pod was recreated, refresh pod names via kubernetes_cluster_snapshot; use previous=true for the last crashed instance.",
             _obj(
                 "Pod logs",
                 {
@@ -193,6 +194,8 @@ def openai_tools() -> List[Dict[str, Any]]:
                     "container": {"type": ["string", "null"]},
                     "tail_lines": {"type": "integer", "default": 100},
                     "previous": {"type": "boolean", "default": False},
+                    "retry_attempts": {"type": "integer", "default": 4},
+                    "retry_delay_seconds": {"type": "number", "default": 1.0},
                 },
                 ["namespace", "pod_name"],
             ),

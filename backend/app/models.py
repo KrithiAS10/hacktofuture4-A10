@@ -70,6 +70,9 @@ class AgentWorkflowResponse(BaseModel):
     # Agent runtimes may store `result` as either a structured dict (success)
     # or a stringified exception message (failure).
     result: Optional[Any] = None
+    api_cost_usd: Optional[float] = None
+    api_usage: Optional[Any] = None
+    incident_report: Optional[Any] = None
 
 
 class AgentWorkflowListResponse(BaseModel):

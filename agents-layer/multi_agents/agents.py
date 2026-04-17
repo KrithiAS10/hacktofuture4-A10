@@ -8,6 +8,8 @@ from typing import Any
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 
+from lerna_shared.usage_pricing import extract_usage_from_langchain_ai_message, usd_cost_for_token_usage
+
 from .agent_prompts import (
     DIAGNOSIS_AGENT_PROMPT,
     EXECUTOR_AGENT_PROMPT,
@@ -84,7 +86,9 @@ def _execute_tool_call(name: str, arguments: Any) -> Any:
 
 def _compile_agent(name: str, system_prompt: str, tool_names: list[str]) -> Any:
     _ = name
-    bound_model = _build_chat_model().bind_tools(build_toolset(tool_names))
+    chat = _build_chat_model()
+    bound_model = chat.bind_tools(build_toolset(tool_names))
+    default_model_name = getattr(chat, "model_name", None) or DEFAULT_MODEL_NAME
 
     class _LangChainAgent:
         def __init__(self, prompt: str) -> None:
@@ -101,8 +105,17 @@ def _compile_agent(name: str, system_prompt: str, tool_names: list[str]) -> Any:
                 else:
                     messages.append(HumanMessage(content=content))
 
+            prompt_tokens = 0
+            completion_tokens = 0
+            model_name = str(default_model_name)
+
             for round_index in range(DEFAULT_MAX_TOOL_ROUNDS):
                 result = bound_model.invoke(messages)
+                pt, ct, md = extract_usage_from_langchain_ai_message(result)
+                prompt_tokens += pt
+                completion_tokens += ct
+                if md:
+                    model_name = md
                 tool_calls = getattr(result, "tool_calls", None) or []
                 transcript.append(
                     {
@@ -132,7 +145,16 @@ def _compile_agent(name: str, system_prompt: str, tool_names: list[str]) -> Any:
                     )
                     messages.append(ToolMessage(content=tool_result_text, tool_call_id=call_id))
 
-            return {"messages": transcript}
+            cost_usd = usd_cost_for_token_usage(model_name, prompt_tokens, completion_tokens)
+            return {
+                "messages": transcript,
+                "usage": {
+                    "prompt_tokens": prompt_tokens,
+                    "completion_tokens": completion_tokens,
+                    "model": model_name,
+                    "cost_usd": round(cost_usd, 6),
+                },
+            }
 
     return _LangChainAgent(system_prompt)
 

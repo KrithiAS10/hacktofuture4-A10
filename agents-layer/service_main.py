@@ -30,7 +30,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from lerna_shared.detection import AgentTriggerResponse, DetectionIncident
 
@@ -50,6 +50,8 @@ if not _pkg_log.handlers:
 workflow_store = WorkflowStore()
 _WORKFLOW_ENGINE_RAW = os.getenv("LERNA_WORKFLOW_ENGINE", "single").strip().lower()
 _USE_LANGGRAPH_ENGINE = _WORKFLOW_ENGINE_RAW in {"langgraph", "multi", "multi-agent", "multi_agents"}
+# Pre-flight budget only; measured LLM spend is added when each workflow finishes.
+_BUDGET_START_RESERVE_USD = float(os.getenv("LERNA_BUDGET_START_RESERVE_USD", "5.0"))
 
 
 async def _accept_incident_with_config(payload: DetectionIncident) -> AgentTriggerResponse:
@@ -59,7 +61,16 @@ async def _accept_incident_with_config(payload: DetectionIncident) -> AgentTrigg
 
 
 class CostSettingsRequest(BaseModel):
-    max_daily_cost: float = Field(ge=0)
+    """Set daily cap in USD, or null / omit to remove the cap (unlimited)."""
+
+    max_daily_cost: float | None = Field(default=None)
+
+    @field_validator("max_daily_cost")
+    @classmethod
+    def _non_negative(cls, v: float | None) -> float | None:
+        if v is not None and v < 0:
+            raise ValueError("max_daily_cost must be >= 0 when set")
+        return v
 
 
 class CostSettingsResponse(BaseModel):
@@ -94,7 +105,7 @@ async def _ensure_budget_allows(cost: float) -> None:
             "message": "Daily max cost reached. Agents will not execute until the limit is increased or a new day starts.",
             "max_daily_cost": max_daily_cost,
             "spent_today": snapshot.spent_today,
-            "incident_cost": cost,
+            "start_reserve_usd": cost,
             "projected_spend": projected_spend,
         },
     )
@@ -129,10 +140,8 @@ async def create_incident_workflow(payload: DetectionIncident) -> AgentTriggerRe
         existing = await workflow_store.get_workflow_for_incident(payload.incident_id)
         is_new_incident = existing is None
         if is_new_incident:
-            await _ensure_budget_allows(payload.cost)
+            await _ensure_budget_allows(_BUDGET_START_RESERVE_USD)
         response = await _accept_incident_with_config(payload)
-        if is_new_incident and response.accepted:
-            await workflow_store.add_daily_spend(payload.cost)
         return response
     except HTTPException:
         raise
@@ -146,10 +155,8 @@ async def create_langgraph_incident_workflow(payload: DetectionIncident) -> Agen
         existing = await workflow_store.get_workflow_for_incident(payload.incident_id)
         is_new_incident = existing is None
         if is_new_incident:
-            await _ensure_budget_allows(payload.cost)
+            await _ensure_budget_allows(_BUDGET_START_RESERVE_USD)
         response = await accept_langgraph_incident(payload, workflow_store)
-        if is_new_incident and response.accepted:
-            await workflow_store.add_daily_spend(payload.cost)
         return response
     except HTTPException:
         raise

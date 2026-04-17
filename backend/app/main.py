@@ -27,13 +27,16 @@ from app.services.agents_service import AgentsService
 from app.services.cluster_poller import ClusterPoller
 from app.services.detection import DetectionService
 from app.services.observability import ObservabilityService
+from app.services.platform_settings import PlatformSettingsStore
 from app.services.prompt_store import PromptStoreService
+from app.config import settings as app_settings
 
 obs_service = ObservabilityService()
 cluster_poller = ClusterPoller(obs_service=obs_service)
 detection_service = DetectionService(obs_service)
 prompt_store = PromptStoreService()
-agents_service = AgentsService()
+platform_settings_store = PlatformSettingsStore(app_settings.platform_settings_db_path)
+agents_service = AgentsService(platform_settings=platform_settings_store)
 logger = logging.getLogger(__name__)
 
 
@@ -64,6 +67,10 @@ def _upstream_error_detail(body: Any, fallback: str) -> str:
 async def lifespan(_: FastAPI):
     await cluster_poller.start()
     try:
+        try:
+            await agents_service.get_cost_settings()
+        except Exception:  # pylint: disable=broad-except
+            logger.warning("Could not sync daily cost cap to agents on startup (agents or Redis may be down).")
         yield
     finally:
         await cluster_poller.stop()

@@ -3,8 +3,14 @@
 import {
   AreaChart, Area, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts'
-import { generateTimeSeriesData } from '@/lib/mock-data'
 import { useMemo } from 'react'
+
+function defaultSparklineSeries(baseValue: number, length: number, variance: number): number[] {
+  return Array.from({ length }, (_, i) => {
+    const wobble = Math.sin(i * 0.65) * variance * 0.45 + Math.cos(i * 0.31) * variance * 0.25
+    return Math.max(0, baseValue + wobble)
+  })
+}
 
 interface SparklineProps {
   color: string
@@ -26,7 +32,7 @@ export function SparklineChart({
   labels,
 }: SparklineProps) {
   const values = useMemo(
-    () => data ?? generateTimeSeriesData(baseValue, 12, 10),
+    () => data ?? defaultSparklineSeries(baseValue, 12, 10),
     [data, baseValue]
   )
 

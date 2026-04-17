@@ -115,6 +115,17 @@ export interface AgentWorkflowResponse {
   finished_at?: string | null
   // Runtime stores may set this to a stringified exception message.
   result?: Record<string, unknown> | string | null
+  api_cost_usd?: number | null
+  api_usage?: Record<string, unknown> | null
+  incident_report?: Record<string, unknown> | null
+}
+
+/** UI chat message (local state + optional persistence). */
+export interface ChatMessage {
+  id: string
+  role: 'user' | 'assistant'
+  content: string
+  timestamp: string
 }
 
 export interface AgentWorkflowListResponse {
