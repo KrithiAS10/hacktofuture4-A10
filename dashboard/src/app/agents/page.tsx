@@ -21,6 +21,8 @@ import {
   updateAgentPrompt,
   type AgentWorkflowResponse,
 } from "@/lib/observation-api";
+import { formatDateTime } from "@/lib/datetime";
+import { formatWorkflowApiCost } from "@/lib/workflow-ui";
 import clsx from "clsx";
 
 type AgentCardStatus = "running" | "processing" | "idle" | "monitoring";
@@ -163,13 +165,6 @@ const defaultSystemPrompts: Record<string, string> = {
   validation:
     "You are the Validation Agent. Verify remediation outcomes and close or reopen incidents based on evidence.",
 };
-
-function formatWorkflowCost(cost?: number | null) {
-  if (typeof cost !== "number" || Number.isNaN(cost)) {
-    return "Cost unavailable";
-  }
-  return `$${cost.toFixed(2)}`;
-}
 
 function getWorkflowResult(workflow: AgentWorkflowResponse | null): Record<string, unknown> | null {
   if (!workflow?.result || typeof workflow.result !== "object") {
@@ -447,9 +442,9 @@ export default function AgentsPage() {
           ? `Running ${formatStageLabel(stageKey)}`
           : `Waiting for ${formatStageLabel(stageKey)}`),
         lastAction: stageOutput?.finished_at
-          ? `Completed at ${stageOutput.finished_at}`
+          ? `Completed at ${formatDateTime(stageOutput.finished_at)}`
           : stageOutput?.started_at
-            ? `Started at ${stageOutput.started_at}`
+            ? `Started at ${formatDateTime(stageOutput.started_at)}`
             : "No activity recorded yet",
         metric: `${progress}%`,
         metricLabel: "Progress",
@@ -581,7 +576,8 @@ export default function AgentsPage() {
               <strong className="text-white">{workflow.workflow_id}</strong> ·
               Incident{" "}
               <strong className="text-white">{workflow.incident_id}</strong> ·
-              Cost <strong className="text-white">{formatWorkflowCost(workflow.cost)}</strong>
+              API cost{" "}
+              <strong className="text-white">{formatWorkflowApiCost(workflow)}</strong>
             </>
           ) : (
             <>
@@ -596,9 +592,9 @@ export default function AgentsPage() {
           <div className="font-semibold mb-1">Live workflow attached</div>
           <div className="text-[#8A9BBB]">
             Status: <span className="text-white">{workflow.status}</span>
-            {` · cost ${formatWorkflowCost(workflow.cost)}`}
-            {workflow.started_at ? ` · started ${workflow.started_at}` : ""}
-            {workflow.finished_at ? ` · finished ${workflow.finished_at}` : ""}
+            {` · API cost ${formatWorkflowApiCost(workflow)}`}
+            {workflow.started_at ? ` · started ${formatDateTime(workflow.started_at)}` : ""}
+            {workflow.finished_at ? ` · finished ${formatDateTime(workflow.finished_at)}` : ""}
           </div>
         </div>
       )}
@@ -637,10 +633,10 @@ export default function AgentsPage() {
                   <div className="text-sm text-white font-semibold">{item.workflow_id}</div>
                   <div className="text-[12px] text-[#8A9BBB] mt-1">{item.incident_id}</div>
                   <div className="text-[11px] text-[#4A5B7A] font-mono mt-2">
-                    {item.status.toUpperCase()} · {item.accepted_at}
+                    {item.status.toUpperCase()} · {formatDateTime(item.accepted_at)}
                   </div>
                   <div className="text-[11px] text-[#8A9BBB] font-mono mt-1">
-                    Cost: {formatWorkflowCost(item.cost)}
+                    API cost: {formatWorkflowApiCost(item)}
                   </div>
                 </button>
               );

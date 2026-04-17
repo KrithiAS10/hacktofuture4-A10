@@ -31,6 +31,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, field_validator
+from typing import Literal
 
 from lerna_shared.detection import AgentTriggerResponse, DetectionIncident
 
@@ -77,6 +78,17 @@ class CostSettingsResponse(BaseModel):
     max_daily_cost: float | None
     spent_today: float
     remaining_today: float | None
+
+
+AgentExecutionMode = Literal["autonomous", "advisory", "paused"]
+
+
+class ExecutionModeResponse(BaseModel):
+    mode: AgentExecutionMode
+
+
+class ExecutionModePayload(BaseModel):
+    mode: AgentExecutionMode
 
 
 async def _cost_snapshot() -> CostSettingsResponse:
@@ -173,6 +185,18 @@ async def get_cost_settings() -> CostSettingsResponse:
 async def update_cost_settings(payload: CostSettingsRequest) -> CostSettingsResponse:
     await workflow_store.set_max_daily_cost(payload.max_daily_cost)
     return await _cost_snapshot()
+
+
+@app.get("/execution-mode", response_model=ExecutionModeResponse)
+async def get_execution_mode() -> ExecutionModeResponse:
+    m = await workflow_store.get_execution_mode()
+    return ExecutionModeResponse(mode=m)  # type: ignore[arg-type]
+
+
+@app.put("/execution-mode", response_model=ExecutionModeResponse)
+async def put_execution_mode(payload: ExecutionModePayload) -> ExecutionModeResponse:
+    m = await workflow_store.set_execution_mode(payload.mode)
+    return ExecutionModeResponse(mode=m)  # type: ignore[arg-type]
 
 
 @app.get("/workflows/latest")

@@ -13,6 +13,7 @@ import {
   type ClusterSummaryResponse,
 } from '@/lib/observation-api'
 import { useWorkflows } from '@/context/WorkflowsContext'
+import { formatDateTime } from '@/lib/datetime'
 import clsx from 'clsx'
 
 const container = {
@@ -60,7 +61,7 @@ function formatRelativeTime(iso?: string): string {
   if (min < 60) return `${min}m ago`
   const hr = Math.floor(min / 60)
   if (hr < 48) return `${hr}h ago`
-  return new Date(iso).toLocaleString()
+  return formatDateTime(iso)
 }
 
 function k8sRecentEventToUi(
@@ -186,9 +187,7 @@ export default function DashboardPage() {
             {loading ? 'Syncing…' : clusterHealth?.ok ? 'Healthy' : 'Degraded'}
           </Badge>
           <Badge variant="blue" className="font-mono text-[10px] normal-case tracking-normal">
-            {clusterHealth?.last_updated
-              ? new Date(clusterHealth.last_updated).toLocaleString()
-              : 'Awaiting data'}
+            {clusterHealth?.last_updated ? formatDateTime(clusterHealth.last_updated) : 'Awaiting data'}
           </Badge>
         </div>
       </PageHeader>

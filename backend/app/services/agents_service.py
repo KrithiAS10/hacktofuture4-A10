@@ -105,3 +105,27 @@ class AgentsService:
         await self._platform.set_agents_max_daily_cost_usd(max_daily_cost)
         await self._sync_agents_max_if_needed(max_daily_cost)
         return await self.get_cost_settings()
+
+    async def get_execution_mode(self) -> Dict[str, str]:
+        stored = await self._platform.get_stored_agents_execution_mode()
+        return {"mode": stored or "autonomous"}
+
+    async def update_execution_mode(self, mode: str) -> Dict[str, Any]:
+        stored = await self._platform.set_agents_execution_mode(mode)
+        response = await self._client.put(
+            f"{settings.agents_service_url}/execution-mode",
+            json={"mode": stored},
+        )
+        response.raise_for_status()
+        return {"mode": stored}
+
+    async def sync_execution_mode_on_startup(self) -> None:
+        stored = await self._platform.get_stored_agents_execution_mode()
+        mode = stored or "autonomous"
+        try:
+            await self._client.put(
+                f"{settings.agents_service_url}/execution-mode",
+                json={"mode": mode},
+            )
+        except httpx.HTTPError as exc:
+            logger.warning("Could not sync execution mode to agents on startup: %s", exc)

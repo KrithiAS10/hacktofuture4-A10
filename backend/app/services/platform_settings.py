@@ -13,6 +13,8 @@ logger = logging.getLogger(__name__)
 
 _TABLE = "lerna_platform_settings"
 _KEY_AGENTS_MAX_DAILY = "agents_max_daily_cost_usd"
+_KEY_AGENTS_EXECUTION_MODE = "agents_execution_mode"
+_VALID_EXECUTION_MODES = frozenset({"autonomous", "advisory", "paused"})
 
 
 def _schema_sql() -> str:
@@ -94,3 +96,23 @@ class PlatformSettingsStore:
     async def clear_agents_max_daily_cost_usd(self) -> None:
         await self._ensure()
         await asyncio.to_thread(_db_delete, self._db_path, _KEY_AGENTS_MAX_DAILY)
+
+    async def get_stored_agents_execution_mode(self) -> str | None:
+        """Return stored mode or None if unset (caller defaults to autonomous)."""
+        await self._ensure()
+        raw = await asyncio.to_thread(_db_get, self._db_path, _KEY_AGENTS_EXECUTION_MODE)
+        if raw is None or raw == "":
+            return None
+        m = str(raw).strip().lower()
+        if m not in _VALID_EXECUTION_MODES:
+            logger.warning("Invalid agents_execution_mode in DB: %r", raw)
+            return None
+        return m
+
+    async def set_agents_execution_mode(self, mode: str) -> str:
+        m = str(mode).strip().lower()
+        if m not in _VALID_EXECUTION_MODES:
+            m = "autonomous"
+        await self._ensure()
+        await asyncio.to_thread(_db_set, self._db_path, _KEY_AGENTS_EXECUTION_MODE, m)
+        return m

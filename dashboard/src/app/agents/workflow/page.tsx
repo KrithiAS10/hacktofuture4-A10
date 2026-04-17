@@ -10,6 +10,8 @@ import {
   fetchLatestAgentWorkflow,
   type AgentWorkflowResponse,
 } from "@/lib/observation-api";
+import { formatDateTime } from "@/lib/datetime";
+import { formatWorkflowApiCost } from "@/lib/workflow-ui";
 
 type ToolCall = {
   id?: string;
@@ -20,23 +22,27 @@ type ToolCall = {
 
 type StageOutput = {
   text?: string;
+  /** Full assistant+tool transcript (optional; keep collapsed in UI). */
+  transcript?: string;
   tool_calls?: ToolCall[];
   started_at?: string;
   finished_at?: string;
 };
+
+const WORKFLOW_STAGE_KEYS = [
+  "filter",
+  "matcher",
+  "diagnosis",
+  "planning",
+  "executor",
+  "validation",
+] as const;
 
 function getWorkflowResult(workflow: AgentWorkflowResponse | null): Record<string, unknown> | null {
   if (!workflow?.result || typeof workflow.result !== "object") {
     return null;
   }
   return workflow.result as Record<string, unknown>;
-}
-
-function formatWorkflowCost(cost?: number | null) {
-  if (typeof cost !== "number" || Number.isNaN(cost)) {
-    return "Cost unavailable";
-  }
-  return `$${cost.toFixed(2)}`;
 }
 
 function getStageOutput(
@@ -60,7 +66,7 @@ function formatStageLabel(stageKey: string) {
 function getWorkflowStages(workflow: AgentWorkflowResponse | null) {
   const result = getWorkflowResult(workflow);
   if (!result) return [];
-  return Object.keys(result).filter((key) => {
+  return WORKFLOW_STAGE_KEYS.filter((key) => {
     const value = result[key];
     return value && typeof value === "object";
   });
@@ -242,10 +248,10 @@ export default function AgentWorkflowDetailPage() {
                   <div className="text-sm font-semibold text-white">{item.workflow_id}</div>
                   <div className="text-[12px] text-[#8A9BBB] mt-1">{item.incident_id}</div>
                   <div className="text-[11px] text-[#4A5B7A] font-mono mt-2">
-                    {item.status.toUpperCase()} · {item.accepted_at}
+                    {item.status.toUpperCase()} · {formatDateTime(item.accepted_at)}
                   </div>
                   <div className="text-[11px] text-[#8A9BBB] font-mono mt-1">
-                    Cost: {formatWorkflowCost(item.cost)}
+                    API cost: {formatWorkflowApiCost(item)}
                   </div>
                 </button>
               );
@@ -265,11 +271,11 @@ export default function AgentWorkflowDetailPage() {
               workflow <strong>{workflow.workflow_id}</strong>.
             </div>
             <div className="text-[12px] text-[#8A9BBB] mt-2">
-              Cost: {formatWorkflowCost(workflow.cost)}
+              API cost: {formatWorkflowApiCost(workflow)}
               {" · "}
-              Accepted: {workflow.accepted_at}
-              {workflow.started_at ? ` · Started: ${workflow.started_at}` : ""}
-              {workflow.finished_at ? ` · Finished: ${workflow.finished_at}` : ""}
+              Accepted: {formatDateTime(workflow.accepted_at)}
+              {workflow.started_at ? ` · Started: ${formatDateTime(workflow.started_at)}` : ""}
+              {workflow.finished_at ? ` · Finished: ${formatDateTime(workflow.finished_at)}` : ""}
               {activeStage ? ` · Current stage: ${activeStage}` : ""}
             </div>
           </div>
@@ -307,17 +313,30 @@ export default function AgentWorkflowDetailPage() {
                   </div>
 
                   <div className="text-[12px] text-[#8A9BBB] mb-3">
-                    {output?.started_at ? `Started: ${output.started_at}` : "Not started yet"}
-                    {output?.finished_at ? ` · Finished: ${output.finished_at}` : ""}
+                    {output?.started_at ? `Started: ${formatDateTime(output.started_at)}` : "Not started yet"}
+                    {output?.finished_at ? ` · Finished: ${formatDateTime(output.finished_at)}` : ""}
                   </div>
 
                   <div className="rounded-xl border border-border bg-bg-3 p-3 mb-3">
                     <div className="text-[11px] text-[#5c6d8c] font-mono tracking-wider mb-2">
-                      AGENT RESPONSE
+                      AGENT SUMMARY
                     </div>
-                    <pre className="whitespace-pre-wrap break-words text-[12px] text-[#E8EDF5] font-mono">
+                    <p className="text-[11px] text-[#6b7c9e] mb-2">
+                      Final reply for this stage (handoff to downstream agents). Tool details stay below.
+                    </p>
+                    <pre className="whitespace-pre-wrap break-words text-[12px] text-[#E8EDF5] font-mono max-h-[min(40vh,420px)] overflow-y-auto">
                       {output?.text?.trim() || "No response yet."}
                     </pre>
+                    {output?.transcript && output.transcript.trim() !== (output.text ?? "").trim() ? (
+                      <details className="mt-3 rounded-lg border border-border/80 bg-bg-2/80">
+                        <summary className="cursor-pointer px-3 py-2 text-[11px] font-mono text-[#8A9BBB] hover:text-[#E8EDF5]">
+                          Full trace (assistant + tool messages)
+                        </summary>
+                        <pre className="whitespace-pre-wrap break-words px-3 pb-3 text-[11px] text-[#9aaccc] font-mono max-h-[min(50vh,520px)] overflow-y-auto border-t border-border/60">
+                          {output.transcript}
+                        </pre>
+                      </details>
+                    ) : null}
                   </div>
 
                   <div className="rounded-xl border border-border bg-bg-3 p-3">

@@ -20,13 +20,13 @@ from .agent_prompts import (
 )
 from .toolset import (
     DIAGNOSIS_AGENT_TOOLS,
-    EXECUTOR_AGENT_TOOLS,
     FILTER_AGENT_TOOLS,
     MATCHER_AGENT_TOOLS,
     PLANNING_AGENT_TOOLS,
     TOOL_CALLABLES,
     VALIDATION_AGENT_TOOLS,
     build_toolset,
+    executor_tool_names_for_mode,
 )
 
 DEFAULT_MODEL_NAME = os.getenv("LERNA_AGENT_MODEL", "gpt-4.1-nano-2025-04-14")
@@ -189,9 +189,18 @@ def get_planning_agent(system_prompt: str | None = None) -> Any:
     return _compile_agent("PlanningAgent", system_prompt or PLANNING_AGENT_PROMPT, PLANNING_AGENT_TOOLS)
 
 
-@lru_cache(maxsize=None)
-def get_executor_agent(system_prompt: str | None = None) -> Any:
-    return _compile_agent("ExecutorAgent", system_prompt or EXECUTOR_AGENT_PROMPT, EXECUTOR_AGENT_TOOLS)
+@lru_cache(maxsize=16)
+def get_executor_agent(system_prompt: str | None = None, execution_mode: str = "autonomous") -> Any:
+    tools = executor_tool_names_for_mode(execution_mode)
+    base = system_prompt or EXECUTOR_AGENT_PROMPT
+    if (execution_mode or "").strip().lower() == "advisory":
+        base = (
+            base
+            + "\n\nEXECUTION MODE IS ADVISORY: you must not claim that live production changes were applied. "
+            "Use kubernetes_server_side_apply_dry_run when validating manifests. "
+            "Spell out exact kubectl or rollout commands for a human operator to run."
+        )
+    return _compile_agent("ExecutorAgent", base, tools)
 
 
 @lru_cache(maxsize=None)

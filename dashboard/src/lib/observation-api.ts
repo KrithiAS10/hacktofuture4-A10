@@ -148,6 +148,12 @@ export interface AgentCostSettingsResponse {
   remaining_today?: number | null
 }
 
+export type AgentExecutionMode = 'autonomous' | 'advisory' | 'paused'
+
+export interface AgentExecutionModeResponse {
+  mode: AgentExecutionMode
+}
+
 export async function fetchClusterHealth() {
   return request<ClusterHealthResponse>('/cluster/health')
 }
@@ -214,5 +220,17 @@ export async function updateAgentCostSettings(maxDailyCost: number) {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ max_daily_cost: maxDailyCost }),
+  })
+}
+
+export async function fetchAgentExecutionMode() {
+  return request<AgentExecutionModeResponse>('/agents/execution-mode')
+}
+
+export async function updateAgentExecutionMode(mode: AgentExecutionMode) {
+  return request<AgentExecutionModeResponse>('/agents/execution-mode', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ mode }),
   })
 }

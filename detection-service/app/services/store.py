@@ -11,6 +11,8 @@ from app.config import settings
 FINGERPRINT_PREFIX = "lerna:detection:fingerprint:"
 RETRY_KEY = "lerna:detection:retries"
 RETRY_ITEM_PREFIX = "lerna:detection:retry:"
+# Must match agents-layer `WorkflowStore.EXECUTION_MODE_KEY` (shared Redis).
+AGENTS_EXECUTION_MODE_REDIS_KEY = "lerna:agents:execution_mode"
 
 
 class DetectionStateStore:
@@ -76,3 +78,13 @@ class DetectionStateStore:
     async def clear_retry(self, incident_id: str) -> None:
         await self._redis.zrem(RETRY_KEY, incident_id)
         await self._redis.delete(f"{RETRY_ITEM_PREFIX}{incident_id}")
+
+    async def get_agents_execution_mode(self) -> str:
+        """How agents react to automatic detection: autonomous | advisory | paused."""
+        raw = await self._redis.get(AGENTS_EXECUTION_MODE_REDIS_KEY)
+        if not raw:
+            return "autonomous"
+        m = str(raw).strip()
+        if m not in ("autonomous", "advisory", "paused"):
+            return "autonomous"
+        return m

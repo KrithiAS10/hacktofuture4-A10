@@ -1,4 +1,29 @@
 import type { AgentWorkflowResponse } from '@/lib/observation-api'
+import { formatDateTime } from '@/lib/datetime'
+
+/** Measured LLM spend (USD). Does not use legacy `cost` (incident hint). */
+export function resolveWorkflowApiCostUsd(w: AgentWorkflowResponse | null | undefined): number | null {
+  if (!w) return null
+  if (typeof w.api_cost_usd === 'number' && !Number.isNaN(w.api_cost_usd)) {
+    return w.api_cost_usd
+  }
+  return null
+}
+
+/** Human-readable API cost; prefers `api_cost_usd` over stale incident `cost` hints. */
+export function formatWorkflowApiCost(w: AgentWorkflowResponse | null | undefined): string {
+  const usd = resolveWorkflowApiCostUsd(w)
+  if (usd !== null) {
+    const abs = Math.abs(usd)
+    const decimals = abs > 0 && abs < 0.01 ? 4 : 2
+    return `$${usd.toFixed(decimals)}`
+  }
+  const st = (w?.status ?? '').toLowerCase()
+  if (st === 'running' || st === 'accepted') {
+    return '…'
+  }
+  return '—'
+}
 
 export type IncidentSeverityUI = 'critical' | 'warning' | 'info'
 export type IncidentStatusUI = 'active' | 'investigating' | 'monitoring' | 'resolved'
@@ -52,20 +77,12 @@ function summarizeResult(w: AgentWorkflowResponse): string {
 }
 
 export function workflowToListRow(w: AgentWorkflowResponse): IncidentListRow {
-  const cost =
-    typeof w.api_cost_usd === 'number' && !Number.isNaN(w.api_cost_usd)
-      ? w.api_cost_usd
-      : (w.cost ?? 0)
+  const cost = resolveWorkflowApiCostUsd(w) ?? 0
   const st = w.status.toLowerCase()
   const severity: IncidentSeverityUI =
     st === 'failed' ? 'critical' : st === 'completed' ? 'info' : st === 'running' ? 'warning' : 'warning'
   const priority: IncidentListRow['priority'] = st === 'failed' ? 'P1' : 'P2'
-  let ts = w.accepted_at
-  try {
-    ts = new Date(w.accepted_at).toLocaleString()
-  } catch {
-    /* keep raw */
-  }
+  const ts = formatDateTime(w.accepted_at)
   return {
     id: w.workflow_id,
     incidentId: w.incident_id,

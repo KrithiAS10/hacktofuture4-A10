@@ -4,8 +4,11 @@ import { useEffect, useMemo, useState } from 'react'
 import { Badge, Button, PageHeader } from '@/components/ui'
 import {
   fetchAgentCostSettings,
+  fetchAgentExecutionMode,
   updateAgentCostSettings,
+  updateAgentExecutionMode,
   type AgentCostSettingsResponse,
+  type AgentExecutionMode,
 } from '@/lib/observation-api'
 
 function formatCurrency(value: number) {
@@ -16,6 +19,31 @@ function formatCurrency(value: number) {
   }).format(value)
 }
 
+const RESPONSE_MODES: {
+  value: AgentExecutionMode
+  title: string
+  description: string
+}[] = [
+  {
+    value: 'autonomous',
+    title: 'Autonomous',
+    description:
+      'When detection finds an incident, it starts a workflow and the executor may run mutating Kubernetes actions (scale, rollout, patches) when the model chooses them.',
+  },
+  {
+    value: 'advisory',
+    title: 'Advisory',
+    description:
+      'Workflows still run from detection, but the executor only uses dry-run validation and written operator steps — no live apply, scale, or destructive cluster changes from tools.',
+  },
+  {
+    value: 'paused',
+    title: 'Manual only',
+    description:
+      'Detection keeps evaluating signals but does not start workflows automatically. You can still start runs from the agents UI, chat, or API.',
+  },
+]
+
 export default function SettingsPage() {
   const [settings, setSettings] = useState<AgentCostSettingsResponse | null>(null)
   const [draftMax, setDraftMax] = useState('')
@@ -24,19 +52,38 @@ export default function SettingsPage() {
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
 
+  const [executionMode, setExecutionMode] = useState<AgentExecutionMode>('autonomous')
+  const [modeLoading, setModeLoading] = useState(true)
+  const [modeSaving, setModeSaving] = useState(false)
+  const [modeError, setModeError] = useState<string | null>(null)
+  const [modeNotice, setModeNotice] = useState<string | null>(null)
+
   useEffect(() => {
     let active = true
     const loadSettings = async () => {
       try {
-        const response = await fetchAgentCostSettings()
+        const [costResponse, modeResponse] = await Promise.all([
+          fetchAgentCostSettings(),
+          fetchAgentExecutionMode(),
+        ])
         if (!active) return
-        setSettings(response)
-        setDraftMax((response.max_daily_cost ?? 0).toString())
+        setSettings(costResponse)
+        setDraftMax((costResponse.max_daily_cost ?? 0).toString())
+        setExecutionMode(modeResponse.mode)
       } catch {
         if (!active) return
         setError('Unable to load agent cost settings right now.')
+        try {
+          const modeResponse = await fetchAgentExecutionMode()
+          if (active) setExecutionMode(modeResponse.mode)
+        } catch {
+          if (active) setModeError('Unable to load response mode.')
+        }
       } finally {
-        if (active) setLoading(false)
+        if (active) {
+          setLoading(false)
+          setModeLoading(false)
+        }
       }
     }
     void loadSettings()
@@ -69,9 +116,24 @@ export default function SettingsPage() {
     }
   }
 
+  const onSaveMode = async (next: AgentExecutionMode) => {
+    setModeSaving(true)
+    setModeError(null)
+    setModeNotice(null)
+    try {
+      const res = await updateAgentExecutionMode(next)
+      setExecutionMode(res.mode)
+      setModeNotice('Response mode updated.')
+    } catch {
+      setModeError('Failed to update response mode.')
+    } finally {
+      setModeSaving(false)
+    }
+  }
+
   return (
     <div className="p-7 flex flex-col gap-6">
-      <PageHeader title="Settings" subtitle="Agent execution budget controls">
+      <PageHeader title="Settings" subtitle="Agent budget and how workflows react to detected incidents">
         {budgetReached ? <Badge variant="red">Budget Reached</Badge> : <Badge variant="green">Budget Available</Badge>}
       </PageHeader>
 
@@ -125,6 +187,48 @@ export default function SettingsPage() {
               {notice && <span className="text-sm text-lerna-green">{notice}</span>}
               {error && <span className="text-sm text-lerna-red">{error}</span>}
             </div>
+          </div>
+        )}
+      </div>
+
+      <div className="bg-bg-2 border border-border rounded-2xl p-6 max-w-2xl">
+        <div className="text-[11px] text-[#4A5B7A] font-mono tracking-widest mb-2">INCIDENT RESPONSE MODE</div>
+        <p className="text-[13px] text-[#8A9BBB] mb-5">
+          Stored in the observation backend database and synced to the agents service and shared Redis so detection and
+          LangGraph runs stay aligned. Advisory tool restrictions apply to the multi-agent (LangGraph) executor; the
+          legacy single-agent engine is not tool-gated the same way.
+        </p>
+
+        {modeLoading ? (
+          <div className="text-sm text-[#8A9BBB]">Loading mode…</div>
+        ) : (
+          <div className="space-y-3">
+            {RESPONSE_MODES.map((opt) => {
+              const selected = executionMode === opt.value
+              return (
+                <label
+                  key={opt.value}
+                  className={`flex cursor-pointer gap-3 rounded-xl border p-4 transition-colors ${
+                    selected ? 'border-lerna-blue bg-bg-3' : 'border-border bg-bg-3/40 hover:border-border-2'
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="execution-mode"
+                    className="mt-1"
+                    checked={selected}
+                    disabled={modeSaving}
+                    onChange={() => void onSaveMode(opt.value)}
+                  />
+                  <div>
+                    <div className="text-sm font-semibold text-white">{opt.title}</div>
+                    <p className="text-[12px] text-[#8A9BBB] mt-1 leading-relaxed">{opt.description}</p>
+                  </div>
+                </label>
+              )
+            })}
+            {modeNotice ? <span className="text-sm text-lerna-green block pt-1">{modeNotice}</span> : null}
+            {modeError ? <span className="text-sm text-lerna-red block pt-1">{modeError}</span> : null}
           </div>
         )}
       </div>

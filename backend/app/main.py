@@ -11,6 +11,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.models import (
     AgentCostSettingsResponse,
     AgentCostSettingsUpdateRequest,
+    AgentExecutionModeResponse,
+    AgentExecutionModeUpdateRequest,
     AgentPromptEntry,
     AgentPromptResetResponse,
     AgentPromptsResponse,
@@ -71,6 +73,10 @@ async def lifespan(_: FastAPI):
             await agents_service.get_cost_settings()
         except Exception:  # pylint: disable=broad-except
             logger.warning("Could not sync daily cost cap to agents on startup (agents or Redis may be down).")
+        try:
+            await agents_service.sync_execution_mode_on_startup()
+        except Exception:  # pylint: disable=broad-except
+            logger.warning("Could not sync execution mode to agents on startup (agents or Redis may be down).")
         yield
     finally:
         await cluster_poller.stop()
@@ -297,6 +303,32 @@ async def update_agent_cost_settings(payload: AgentCostSettingsUpdateRequest):
     except Exception as exc:  # pylint: disable=broad-except
         logger.exception("Failed to update agent cost settings")
         raise HTTPException(status_code=502, detail=f"Failed to update cost settings: {exc}") from exc
+
+
+@app.get("/api/agents/execution-mode", response_model=AgentExecutionModeResponse)
+async def get_agent_execution_mode():
+    try:
+        data = await agents_service.get_execution_mode()
+        return AgentExecutionModeResponse(mode=data["mode"])  # type: ignore[arg-type]
+    except httpx.HTTPStatusError as exc:
+        logger.exception("Failed to query execution mode")
+        raise HTTPException(status_code=502, detail="Failed to query execution mode") from exc
+    except Exception as exc:  # pylint: disable=broad-except
+        logger.exception("Failed to query execution mode")
+        raise HTTPException(status_code=502, detail=f"Failed to query execution mode: {exc}") from exc
+
+
+@app.put("/api/agents/execution-mode", response_model=AgentExecutionModeResponse)
+async def update_agent_execution_mode(payload: AgentExecutionModeUpdateRequest):
+    try:
+        data = await agents_service.update_execution_mode(payload.mode)
+        return AgentExecutionModeResponse(mode=data["mode"])  # type: ignore[arg-type]
+    except httpx.HTTPStatusError as exc:
+        logger.exception("Failed to update execution mode")
+        raise HTTPException(status_code=502, detail="Failed to update execution mode") from exc
+    except Exception as exc:  # pylint: disable=broad-except
+        logger.exception("Failed to update execution mode")
+        raise HTTPException(status_code=502, detail=f"Failed to update execution mode: {exc}") from exc
 
 
 @app.put("/api/agents/prompts/{agent_id}", response_model=AgentPromptEntry)

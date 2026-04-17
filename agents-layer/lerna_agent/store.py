@@ -14,6 +14,9 @@ LAST_WORKFLOW_KEY = "lerna:agents:workflow:last"
 COST_SETTINGS_KEY = "lerna:agents:cost:settings"
 DAILY_COST_KEY_PREFIX = "lerna:agents:cost:daily:"
 PROMPT_HASH_KEY = "lerna:agent_prompts"
+# Shared with detection-service worker (same Redis).
+EXECUTION_MODE_KEY = "lerna:agents:execution_mode"
+VALID_EXECUTION_MODES = frozenset({"autonomous", "advisory", "paused"})
 
 
 class WorkflowStore:
@@ -131,3 +134,16 @@ class WorkflowStore:
             for agent_id, value in zip(agent_ids, values)
             if value is not None
         }
+
+    async def get_execution_mode(self) -> str:
+        raw = await self._redis.get(EXECUTION_MODE_KEY)
+        if not raw or str(raw).strip() not in VALID_EXECUTION_MODES:
+            return "autonomous"
+        return str(raw).strip()
+
+    async def set_execution_mode(self, mode: str) -> str:
+        m = str(mode).strip()
+        if m not in VALID_EXECUTION_MODES:
+            m = "autonomous"
+        await self._redis.set(EXECUTION_MODE_KEY, m)
+        return m

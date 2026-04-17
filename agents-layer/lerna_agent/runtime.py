@@ -92,6 +92,8 @@ async def execute_incident_workflow(
             total_usd += float(reporter_u.get("cost_usd") or 0)
             workflow["api_usage"]["reporter"] = reporter_u
         workflow["api_cost_usd"] = round(total_usd, 6)
+        # Keep legacy `cost` aligned with measured spend (was incident.cost hint only).
+        workflow["cost"] = workflow["api_cost_usd"]
         if total_usd > 0:
             await store.add_daily_spend(total_usd)
         logger.info("Agents: workflow %s completed (incident %s)", workflow_id, incident.incident_id)

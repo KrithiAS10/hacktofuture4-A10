@@ -55,11 +55,13 @@ async def execute_incident_workflow(
             future = asyncio.run_coroutine_threadsafe(_save_stage(stage_name, stage_output), loop)
             future.result(timeout=15)
 
+        execution_mode = await store.get_execution_mode()
         result = await asyncio.to_thread(
             run_langgraph_workflow,
             incident,
             _on_stage_complete,
             prompt_overrides,
+            execution_mode=execution_mode,
         )
         workflow["status"] = "completed"
         workflow["result"] = result
@@ -87,6 +89,7 @@ async def execute_incident_workflow(
             "reporter": (report_bundle or {}).get("api_usage"),
         }
         workflow["api_cost_usd"] = round(total_usd, 6)
+        workflow["cost"] = workflow["api_cost_usd"]
         if total_usd > 0:
             await store.add_daily_spend(total_usd)
     except Exception as exc:  # pylint: disable=broad-except
