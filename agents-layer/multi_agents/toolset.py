@@ -128,6 +128,17 @@ EXECUTOR_AGENT_TOOLS = [
     "kubernetes_server_side_apply_dry_run",
 ]
 
+# Advisory mode: no live mutating cluster actions; dry-run + operator-facing steps only.
+EXECUTOR_AGENT_TOOLS_ADVISORY = [
+    "kubernetes_server_side_apply_dry_run",
+]
+
+
+def executor_tool_names_for_mode(mode: str) -> list[str]:
+    if (mode or "").strip().lower() == "advisory":
+        return list(EXECUTOR_AGENT_TOOLS_ADVISORY)
+    return list(EXECUTOR_AGENT_TOOLS)
+
 VALIDATION_AGENT_TOOLS = [
     "prometheus_query",
     "loki_query_range",

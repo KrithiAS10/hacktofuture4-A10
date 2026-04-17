@@ -37,6 +37,9 @@ spec:
               value: "15"
             - name: AGENTS_ORCHESTRATOR_TIMEOUT_SECONDS
               value: "120"
+            # Fallback daily LLM cap (USD) before any value is saved via Settings UI / SQLite
+            - name: LERNA_DEFAULT_MAX_DAILY_AGENT_COST_USD
+              value: "100"
 ---
 apiVersion: v1
 kind: Service

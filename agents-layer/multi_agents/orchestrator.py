@@ -48,7 +48,7 @@ def _build_orchestrator_agent() -> Any:
     return _OrchestratorAgent()
 
 
-@lru_cache(maxsize=None)
+# @lru_cache(maxsize=None)
 def get_orchestrator_agent() -> Any:
     return _build_orchestrator_agent()
 
@@ -64,8 +64,10 @@ def _serialize_workflow_context(workflow: dict[str, Any] | None) -> str:
         f"Accepted at: {workflow.get('accepted_at')}",
     ]
 
-    if workflow.get("cost") is not None:
-        lines.append(f"Estimated cost: {workflow.get('cost')}")
+    if workflow.get("api_cost_usd") is not None:
+        lines.append(f"Measured API cost (USD): {workflow.get('api_cost_usd')}")
+    elif workflow.get("cost") is not None:
+        lines.append(f"Incident cost hint: {workflow.get('cost')}")
     if workflow.get("current_stage") is not None:
         lines.append(f"Current stage: {workflow.get('current_stage')}")
 
@@ -79,6 +81,8 @@ def _serialize_workflow_context(workflow: dict[str, Any] | None) -> str:
         lines.append("")
         lines.append("Workflow stage outputs:")
         for stage, output in result.items():
+            if stage == "api_usage":
+                continue
             if isinstance(output, dict):
                 text = output.get('text')
                 started_at = output.get("started_at")

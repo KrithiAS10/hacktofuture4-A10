@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import json
 import os
+from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 from openai import OpenAI
+
+from lerna_shared.usage_pricing import extract_usage_from_openai_completion, usd_cost_for_token_usage
 
 from .tool_registry import dispatch_tool, openai_tools, tool_result_to_json_content
 
@@ -39,6 +42,17 @@ def _assistant_message_dict(msg: Any) -> Dict[str, Any]:
     return out
 
 
+@dataclass
+class LernaRunOutcome:
+    """Result of `LernaAgent.run` including aggregated chat-completions usage and estimated USD cost."""
+
+    text: str
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    cost_usd: float = 0.0
+    model: str = ""
+
+
 class LernaAgent:
     """OpenAI Chat Completions agent with function tools (single-turn or multi-step tool loops)."""
 
@@ -68,14 +82,18 @@ class LernaAgent:
         user_message: str,
         *,
         conversation: Optional[List[Dict[str, Any]]] = None,
-    ) -> str:
+    ) -> LernaRunOutcome:
         """
-        Send a user message and return the model's final natural-language reply after any tool calls.
+        Send a user message and return the model's final reply plus aggregated usage and estimated API cost (USD).
         """
         messages: List[Dict[str, Any]] = list(conversation) if conversation else []
         if not messages or messages[0].get("role") != "system":
             messages.insert(0, {"role": "system", "content": self.system_prompt})
         messages.append({"role": "user", "content": user_message})
+
+        prompt_tokens = 0
+        completion_tokens = 0
+        model_id = self.model
 
         rounds = 0
         while rounds < self.max_tool_rounds:
@@ -87,11 +105,24 @@ class LernaAgent:
                 tool_choice="auto",
                 temperature=0.2,
             )
+            pt, ct, m = extract_usage_from_openai_completion(response)
+            prompt_tokens += pt
+            completion_tokens += ct
+            if m:
+                model_id = m
             choice = response.choices[0]
             msg = choice.message
 
             if not getattr(msg, "tool_calls", None) or not msg.tool_calls:
-                return (msg.content or "").strip()
+                text = (msg.content or "").strip()
+                cost = usd_cost_for_token_usage(model_id, prompt_tokens, completion_tokens)
+                return LernaRunOutcome(
+                    text=text,
+                    prompt_tokens=prompt_tokens,
+                    completion_tokens=completion_tokens,
+                    cost_usd=cost,
+                    model=model_id,
+                )
 
             messages.append(_assistant_message_dict(msg))
 
@@ -108,9 +139,16 @@ class LernaAgent:
                     }
                 )
 
-        return "Stopped: max tool rounds exceeded. Increase LERNA_AGENT_MAX_TOOL_ROUNDS or narrow the task."
+        cost = usd_cost_for_token_usage(model_id, prompt_tokens, completion_tokens)
+        return LernaRunOutcome(
+            text="Stopped: max tool rounds exceeded. Increase LERNA_AGENT_MAX_TOOL_ROUNDS or narrow the task.",
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            cost_usd=cost,
+            model=model_id,
+        )
 
 
 def run_agent(user_message: str, **kwargs: Any) -> str:
-    """Convenience: one-shot `LernaAgent().run(user_message)`."""
-    return LernaAgent(**kwargs).run(user_message)
+    """Convenience: one-shot `LernaAgent().run(user_message)` returning assistant text only."""
+    return LernaAgent(**kwargs).run(user_message).text

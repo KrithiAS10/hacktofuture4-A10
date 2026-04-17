@@ -36,6 +36,33 @@ After remediation, verify whether the incident has been resolved.
 Use metrics, logs, events, and cluster state to confirm recovery and identify any remaining symptoms.
 """
 
+# Max chars per upstream handoff in the user prompt (full evidence stays under "Incident").
+_HANDOFF_MAX_CHARS = 3200
+
+_PIPELINE_STAGES: list[tuple[str, str]] = [
+    ("Filter", "Decide whether the incident warrants the rest of the pipeline."),
+    ("Incident Matching", "Retrieve similar past incidents and summarize relevant prior fixes."),
+    ("Diagnosis", "Determine likely root cause using evidence, logs, metrics, and tools."),
+    ("Planning", "Propose safe remediation plans (prefer sandbox-first)."),
+    ("Execution", "Describe concrete actions to apply the chosen plan."),
+    ("Validation", "Verify recovery and remaining risk after execution guidance."),
+]
+
+
+def _stage_meta(stage_name: str) -> tuple[int, int, str]:
+    total = len(_PIPELINE_STAGES)
+    for idx, (name, desc) in enumerate(_PIPELINE_STAGES, start=1):
+        if name == stage_name:
+            return idx, total, desc
+    return 0, total, "Execute your specialist role for this incident."
+
+
+def _truncate_handoff(text: str) -> str:
+    t = text.strip()
+    if len(t) <= _HANDOFF_MAX_CHARS:
+        return t
+    return t[: _HANDOFF_MAX_CHARS] + "\n…(truncated for handoff)"
+
 
 def incident_summary(incident: DetectionIncident) -> str:
     evidence_lines = [
@@ -61,23 +88,32 @@ def build_agent_input(
     stage_name: str,
     previous_outputs: dict[str, Any] | None = None,
 ) -> str:
-    lines = [
-        f"Stage: {stage_name}",
-        incident_summary(incident),
-    ]
+    step_no, total, role_line = _stage_meta(stage_name)
+    header = (
+        f"You are working in a multi-agent incident pipeline.\n"
+        f"Current stage: {stage_name} (step {step_no} of {total} if applicable).\n"
+        f"Your focus: {role_line}\n"
+        f"You receive concise handoffs from upstream agents — not their full tool logs. "
+        f"Use your tools when you need fresh cluster or observability data.\n"
+        f"Do not repeat upstream work; build on their conclusions."
+    )
+
+    lines = [header, "", "## Incident (authoritative context)", incident_summary(incident)]
 
     if previous_outputs:
         lines.append("")
-        lines.append("Previous agent outputs:")
+        lines.append("## Upstream handoffs (summarized conclusions only)")
         for step_name, output in previous_outputs.items():
-            lines.append(f"--- {step_name} ---")
+            lines.append(f"### From {step_name} agent")
             if isinstance(output, dict) and "messages" in output:
-                lines.extend(_messages_to_text(output["messages"]).splitlines())
+                body = _messages_to_text(output["messages"])
             else:
-                lines.append(str(output))
+                body = str(output)
+            lines.append(_truncate_handoff(body))
             lines.append("")
 
-    lines.append("Use this information to complete your task.")
+    lines.append("## Your task")
+    lines.append("Complete your stage using the incident context and upstream handoffs. Be specific and actionable.")
     return "\n".join(lines)
 
 

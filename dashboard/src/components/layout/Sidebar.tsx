@@ -6,16 +6,19 @@ import { motion } from 'framer-motion'
 import { LayoutDashboard, AlertTriangle, Bot, MessageSquare, Settings } from 'lucide-react'
 import clsx from 'clsx'
 
+import { useWorkflows } from '@/context/WorkflowsContext'
+
 const navItems = [
-  { href: '/dashboard', label: 'Overview', icon: LayoutDashboard, badge: null },
-  { href: '/incidents', label: 'Incidents', icon: AlertTriangle, badge: '3' },
-  { href: '/agents', label: 'Agents', icon: Bot, badge: null },
-  { href: '/chat', label: 'Chat', icon: MessageSquare, badge: null },
-  { href: '/settings', label: 'Settings', icon: Settings, badge: null },
-]
+  { href: '/dashboard', label: 'Overview', icon: LayoutDashboard },
+  { href: '/incidents', label: 'Incidents', icon: AlertTriangle },
+  { href: '/agents', label: 'Agents', icon: Bot },
+  { href: '/chat', label: 'Chat', icon: MessageSquare },
+  { href: '/settings', label: 'Settings', icon: Settings },
+] as const
 
 export function Sidebar() {
   const pathname = usePathname()
+  const { openCount } = useWorkflows()
 
   return (
     <aside className="fixed left-0 top-0 z-50 flex h-screen w-[var(--sidebar-width)] flex-col border-r border-border bg-[#0a0e18]/95 backdrop-blur-md">
@@ -63,11 +66,11 @@ export function Sidebar() {
                   className={clsx('shrink-0', active ? 'text-lerna-blue2' : 'text-[#6b7c9e] group-hover:text-[#9aaccc]')}
                 />
                 <span className="flex-1 truncate">{item.label}</span>
-                {item.badge && (
+                {item.href === '/incidents' && openCount > 0 ? (
                   <span className="rounded-md bg-lerna-red/90 px-1.5 py-0.5 text-[10px] font-semibold tabular-nums text-white">
-                    {item.badge}
+                    {openCount}
                   </span>
-                )}
+                ) : null}
               </motion.div>
             </Link>
           )

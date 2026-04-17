@@ -11,6 +11,19 @@ from app.config import settings
 logger = logging.getLogger(__name__)
 EXCLUDED_SERVICE_NAMESPACES = {"lerna"}
 
+
+def _format_poll_failure(exc: BaseException, timeout_seconds: int) -> str:
+    """asyncio.TimeoutError stringifies to '' — always return a useful API reason."""
+    if isinstance(exc, asyncio.TimeoutError):
+        return (
+            f"kubernetes_poll_timeout: parallel list calls did not finish within {timeout_seconds}s "
+            "(try K8S_NAMESPACE_SCOPE to limit work, or raise POLL_TIMEOUT_SECONDS)"
+        )
+    msg = str(exc).strip()
+    if msg:
+        return msg
+    return f"{type(exc).__name__}"
+
 if TYPE_CHECKING:
     from app.services.observability import ObservabilityService
 
@@ -113,7 +126,7 @@ class ClusterPoller:
             self._snapshot = {
                 "available": False,
                 "last_updated": datetime.now(tz=timezone.utc).isoformat(),
-                "reason": str(exc),
+                "reason": _format_poll_failure(exc, settings.poll_timeout_seconds),
                 "namespace_scope": settings.k8s_namespace_scope or None,
             }
 

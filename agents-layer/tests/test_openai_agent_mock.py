@@ -24,17 +24,21 @@ def test_agent_tool_loop_finishes_after_second_completion():
     final_msg.content = "Backends are unhealthy."
     final_msg.tool_calls = None
 
+    def _completion(msg: MagicMock) -> MagicMock:
+        comp = MagicMock(choices=[MagicMock(message=msg)])
+        comp.model = "gpt-4.1-nano-2025-04-14"
+        comp.usage = MagicMock(prompt_tokens=5, completion_tokens=3)
+        return comp
+
     mock_create = MagicMock()
-    mock_create.side_effect = [
-        MagicMock(choices=[MagicMock(message=tool_msg)]),
-        MagicMock(choices=[MagicMock(message=final_msg)]),
-    ]
+    mock_create.side_effect = [_completion(tool_msg), _completion(final_msg)]
 
     agent = LernaAgent(api_key="sk-test")
     with patch.object(agent._client.chat.completions, "create", mock_create):
-        reply = agent.run("Check observability health.")
+        outcome = agent.run("Check observability health.")
 
-    assert "unhealthy" in reply.lower() or "Backends" in reply
+    assert "unhealthy" in outcome.text.lower() or "Backends" in outcome.text
+    assert outcome.cost_usd >= 0
     assert mock_create.call_count == 2
 
 

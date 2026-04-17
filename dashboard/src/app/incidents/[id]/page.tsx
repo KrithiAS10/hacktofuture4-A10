@@ -1,21 +1,18 @@
 'use client'
-// src/app/incidents/[id]/page.tsx
+
 import { motion } from 'framer-motion'
 import { ArrowLeft, Play, FlaskConical, AlertOctagon, Brain } from 'lucide-react'
 import Link from 'next/link'
-import { useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useParams } from 'next/navigation'
 import { Badge, Button, PageHeader } from '@/components/ui'
 import { SparklineChart } from '@/components/charts/SparklineChart'
-import { incidentLogs, incidents } from '@/lib/mock-data'
 import clsx from 'clsx'
-
-const errorRateData = [2.1, 2.3, 4.8, 9.2, 18.7, 18.1, 17.9, 18.3, 17.6, 17.8, 18.0, 17.5]
-const rcaCauses = [
-  { rank: 1, color: 'text-lerna-amber', confidence: '87%', text: 'Database connection pool exhaustion on db-primary:5432. Pool limit (100) reached under peak load from marketing campaign spike (+340%).' },
-  { rank: 2, color: 'text-[#4A5B7A]', confidence: '74%', text: 'Missing read replica routing for SELECT queries causing unnecessary write-path load. 68% of DB queries are reads routed to primary.' },
-  { rank: 3, color: 'text-[#4A5B7A]', confidence: '61%', text: 'Upstream traffic spike (+340% vs baseline) from marketing campaign triggered cascading failure in payment pipeline downstream.' },
-]
+import { fetchAgentWorkflow, type AgentWorkflowResponse } from '@/lib/observation-api'
+import {
+  extractLogLinesFromWorkflow,
+  rcaFromWorkflow,
+} from '@/lib/workflow-ui'
 
 const logLevelStyle: Record<string, string> = {
   ERROR: 'text-lerna-red',
@@ -24,16 +21,67 @@ const logLevelStyle: Record<string, string> = {
   SUCCESS: 'text-lerna-green',
 }
 
+const errorRateData = [2.1, 2.3, 4.8, 9.2, 18.7, 18.1, 17.9, 18.3, 17.6, 17.8, 18.0, 17.5]
+
 export default function IncidentDetailPage() {
   const params = useParams<{ id: string }>()
-  const incident = useMemo(
-    () => incidents.find((item) => item.id === params?.id) ?? incidents[0],
-    [params?.id]
-  )
+  const [wf, setWf] = useState<AgentWorkflowResponse | null | undefined>(undefined)
+  const [loadError, setLoadError] = useState<string | null>(null)
+
+  useEffect(() => {
+    const id = params?.id
+    if (!id) return
+    let cancel = false
+    setWf(undefined)
+    setLoadError(null)
+    void fetchAgentWorkflow(id)
+      .then((w) => {
+        if (!cancel) setWf(w)
+      })
+      .catch(() => {
+        if (!cancel) {
+          setWf(null)
+          setLoadError('Workflow not found or agents API unreachable.')
+        }
+      })
+    return () => {
+      cancel = true
+    }
+  }, [params?.id])
+
+  const cost = useMemo(() => {
+    if (!wf) return 0
+    if (typeof wf.api_cost_usd === 'number' && !Number.isNaN(wf.api_cost_usd)) return wf.api_cost_usd
+    return wf.cost ?? 0
+  }, [wf])
+
+  const title = wf ? `Incident ${wf.incident_id}` : 'Incident'
+  const subtitle = wf ? `${wf.workflow_id} · ${wf.status}` : 'Loading…'
+
+  const logLines = useMemo(() => (wf ? extractLogLinesFromWorkflow(wf) : []), [wf])
+  const rcaItems = useMemo(() => (wf ? rcaFromWorkflow(wf) : []), [wf])
+
+  if (wf === undefined) {
+    return (
+      <div className="p-7 text-sm text-[#8A9BBB]">Loading workflow…</div>
+    )
+  }
+
+  if (wf === null) {
+    return (
+      <div className="p-7 flex flex-col gap-4">
+        <Link href="/incidents" className="text-[12px] text-[#4A5B7A] hover:text-[#8A9BBB] font-mono w-fit">
+          ← Back to Incidents
+        </Link>
+        <div className="rounded-xl border border-lerna-red/40 bg-bg-2 px-4 py-3 text-sm text-lerna-red">
+          {loadError ?? 'Unknown error'}
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="p-7 flex flex-col gap-6">
-      {/* Back + Header */}
       <div>
         <Link href="/incidents">
           <motion.div
@@ -43,87 +91,91 @@ export default function IncidentDetailPage() {
             <ArrowLeft size={12} /> Back to Incidents
           </motion.div>
         </Link>
-        <PageHeader title={incident.title} subtitle={`${incident.id} · ${incident.service}`}>
-          <Badge variant="red">{incident.priority} {incident.severity.toUpperCase()}</Badge>
-          <Badge variant="amber">{incident.status.toUpperCase()} · {incident.timestamp}</Badge>
-          <Badge variant="blue">${incident.cost.toFixed(2)} COST</Badge>
+        <PageHeader title={title} subtitle={subtitle}>
+          <Badge variant={wf.status === 'failed' ? 'red' : wf.status === 'completed' ? 'green' : 'amber'}>
+            {wf.status.toUpperCase()}
+          </Badge>
+          <Badge variant="blue">${cost.toFixed(4)} API</Badge>
         </PageHeader>
       </div>
 
-      {/* Logs + Metrics grid */}
       <motion.div
-        initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.35 }}
+        initial={{ opacity: 0, y: 16 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.35 }}
         className="grid grid-cols-1 lg:grid-cols-2 gap-4"
       >
-        {/* Terminal Logs */}
         <div>
           <div className="text-[11px] font-semibold text-[#4A5B7A] tracking-widest uppercase font-mono mb-3">
-            Live Logs
+            Agent output (abridged)
           </div>
           <div className="bg-[#060A10] border border-border rounded-xl p-4 h-[280px] overflow-y-auto terminal-scroll font-mono text-xs space-y-0.5">
-            {incidentLogs.map((log, i) => (
+            {logLines.map((log, i) => (
               <motion.div
-                key={i}
+                key={`${log.time}-${i}`}
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
-                transition={{ delay: i * 0.04 }}
+                transition={{ delay: i * 0.02 }}
                 className="py-0.5 border-b border-white/[0.03] leading-relaxed"
               >
                 <span className="text-[#4A5B7A]">{log.time} </span>
-                <span className={clsx('font-semibold', logLevelStyle[log.level])}>[{log.level.padEnd(5)}]</span>
+                <span className={clsx('font-semibold', logLevelStyle[log.level] ?? 'text-[#8A9BBB]')}>
+                  [{log.level.padEnd(5)}]
+                </span>
                 <span className="text-[#8A9BBB] ml-1"> {log.message}</span>
               </motion.div>
             ))}
           </div>
         </div>
 
-        {/* Metrics */}
         <div>
           <div className="text-[11px] font-semibold text-[#4A5B7A] tracking-widest uppercase font-mono mb-3">
-            Error Rate
+            Error rate (demo)
           </div>
           <div className="bg-bg-2 border border-border rounded-xl p-5 h-[280px] flex flex-col">
-            <div className="text-[11px] font-mono text-[#8A9BBB] mb-1">Error Rate %</div>
-            <div className="text-2xl font-black text-lerna-red mb-1">18.7%</div>
-            <div className="text-[11px] text-[#4A5B7A] font-mono mb-4">↑ from 2.1% baseline</div>
+            <div className="text-[11px] font-mono text-[#8A9BBB] mb-1">Placeholder chart</div>
+            <div className="text-2xl font-black text-lerna-red mb-1">—</div>
+            <div className="text-[11px] text-[#4A5B7A] font-mono mb-4">Wire PromQL / Loki for live error rate</div>
             <div className="flex-1">
-              <SparklineChart
-                color="#EF4444"
-                gradientId="error"
-                data={errorRateData}
-                height={160}
-                showTooltip
-              />
+              <SparklineChart color="#EF4444" gradientId="error" data={errorRateData} height={160} showTooltip />
             </div>
           </div>
         </div>
       </motion.div>
 
-      {/* Root Cause Analysis */}
       <motion.div
-        initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15, duration: 0.35 }}
+        initial={{ opacity: 0, y: 16 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.15, duration: 0.35 }}
         className="bg-gradient-to-br from-[rgba(168,85,247,0.08)] to-[rgba(59,130,246,0.08)] border border-[rgba(168,85,247,0.2)] rounded-2xl p-6"
       >
         <div className="flex items-center gap-2.5 mb-4">
           <Brain size={15} className="text-lerna-purple2" />
           <span className="text-[13px] font-bold text-lerna-purple2 font-mono tracking-wide">
-            Root Cause Analysis · Confidence 87%
+            Post-run report {rcaItems.length ? '' : '(pending)'}
           </span>
         </div>
-        <div className="space-y-0">
-          {rcaCauses.map((rca, i) => (
-            <div key={i} className="flex gap-3 py-3 border-b border-white/[0.05] last:border-b-0 text-[13px]">
-              <span className={clsx('font-mono font-bold shrink-0 mt-0.5', rca.color)}>{rca.rank}.</span>
-              <span className="flex-1 text-[#8A9BBB] leading-relaxed">{rca.text}</span>
-              <span className="text-[10px] text-[#4A5B7A] font-mono shrink-0 mt-1">{rca.confidence} conf.</span>
-            </div>
-          ))}
-        </div>
+        {rcaItems.length ? (
+          <div className="space-y-0">
+            {rcaItems.map((rca, i) => (
+              <div key={i} className="flex gap-3 py-3 border-b border-white/[0.05] last:border-b-0 text-[13px]">
+                <span className="font-mono font-bold shrink-0 mt-0.5 text-lerna-amber">{i + 1}.</span>
+                <span className="flex-1 text-[#8A9BBB] leading-relaxed">{rca.text}</span>
+                <span className="text-[10px] text-[#4A5B7A] font-mono shrink-0 mt-1">{rca.confidence}</span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-[13px] text-[#8A9BBB]">
+            No Qdrant incident report yet for this run. Complete workflows with reporting enabled populate this section.
+          </p>
+        )}
       </motion.div>
 
-      {/* Action Buttons */}
       <motion.div
-        initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.25, duration: 0.35 }}
+        initial={{ opacity: 0, y: 16 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.25, duration: 0.35 }}
         className="flex gap-3 flex-wrap"
       >
         <Button variant="primary">

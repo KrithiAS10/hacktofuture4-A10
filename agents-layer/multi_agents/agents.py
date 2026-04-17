@@ -8,6 +8,8 @@ from typing import Any
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 
+from lerna_shared.usage_pricing import extract_usage_from_langchain_ai_message, usd_cost_for_token_usage
+
 from .agent_prompts import (
     DIAGNOSIS_AGENT_PROMPT,
     EXECUTOR_AGENT_PROMPT,
@@ -18,13 +20,13 @@ from .agent_prompts import (
 )
 from .toolset import (
     DIAGNOSIS_AGENT_TOOLS,
-    EXECUTOR_AGENT_TOOLS,
     FILTER_AGENT_TOOLS,
     MATCHER_AGENT_TOOLS,
     PLANNING_AGENT_TOOLS,
     TOOL_CALLABLES,
     VALIDATION_AGENT_TOOLS,
     build_toolset,
+    executor_tool_names_for_mode,
 )
 
 DEFAULT_MODEL_NAME = os.getenv("LERNA_AGENT_MODEL", "gpt-4.1-nano-2025-04-14")
@@ -34,15 +36,21 @@ DEFAULT_MAX_TOOL_ROUNDS = int(os.getenv("LERNA_AGENT_MAX_TOOL_ROUNDS", "12"))
 
 
 def _build_chat_model(model_name: str | None = None) -> ChatOpenAI:
-    if not DEFAULT_API_KEY:
+    api_key = os.getenv("OPENROUTER_API_KEY") or os.getenv("OPENAI_API_KEY")
+    base_url = os.getenv("OPENROUTER_BASE_URL") or os.getenv("OPENAI_BASE_URL")
+    default_model = os.getenv("LERNA_AGENT_MODEL", DEFAULT_MODEL_NAME)
+
+    if not api_key:
         raise ValueError("OPENROUTER_API_KEY is not set (pass api_key= or set the env var).")
+
     max_tokens = int(os.getenv("LERNA_AGENT_MAX_TOKENS", "2048"))
+
     return ChatOpenAI(
-        model=model_name or DEFAULT_MODEL_NAME,
+        model=model_name or default_model,
         temperature=0.0,
         max_tokens=max_tokens,
-        api_key=DEFAULT_API_KEY,
-        base_url=DEFAULT_BASE_URL,
+        api_key=api_key,
+        base_url=base_url,
     )
 
 
@@ -84,7 +92,9 @@ def _execute_tool_call(name: str, arguments: Any) -> Any:
 
 def _compile_agent(name: str, system_prompt: str, tool_names: list[str]) -> Any:
     _ = name
-    bound_model = _build_chat_model().bind_tools(build_toolset(tool_names))
+    chat = _build_chat_model()
+    bound_model = chat.bind_tools(build_toolset(tool_names))
+    default_model_name = getattr(chat, "model_name", None) or DEFAULT_MODEL_NAME
 
     class _LangChainAgent:
         def __init__(self, prompt: str) -> None:
@@ -101,8 +111,17 @@ def _compile_agent(name: str, system_prompt: str, tool_names: list[str]) -> Any:
                 else:
                     messages.append(HumanMessage(content=content))
 
+            prompt_tokens = 0
+            completion_tokens = 0
+            model_name = str(default_model_name)
+
             for round_index in range(DEFAULT_MAX_TOOL_ROUNDS):
                 result = bound_model.invoke(messages)
+                pt, ct, md = extract_usage_from_langchain_ai_message(result)
+                prompt_tokens += pt
+                completion_tokens += ct
+                if md:
+                    model_name = md
                 tool_calls = getattr(result, "tool_calls", None) or []
                 transcript.append(
                     {
@@ -132,7 +151,16 @@ def _compile_agent(name: str, system_prompt: str, tool_names: list[str]) -> Any:
                     )
                     messages.append(ToolMessage(content=tool_result_text, tool_call_id=call_id))
 
-            return {"messages": transcript}
+            cost_usd = usd_cost_for_token_usage(model_name, prompt_tokens, completion_tokens)
+            return {
+                "messages": transcript,
+                "usage": {
+                    "prompt_tokens": prompt_tokens,
+                    "completion_tokens": completion_tokens,
+                    "model": model_name,
+                    "cost_usd": round(cost_usd, 6),
+                },
+            }
 
     return _LangChainAgent(system_prompt)
 
@@ -161,9 +189,18 @@ def get_planning_agent(system_prompt: str | None = None) -> Any:
     return _compile_agent("PlanningAgent", system_prompt or PLANNING_AGENT_PROMPT, PLANNING_AGENT_TOOLS)
 
 
-@lru_cache(maxsize=None)
-def get_executor_agent(system_prompt: str | None = None) -> Any:
-    return _compile_agent("ExecutorAgent", system_prompt or EXECUTOR_AGENT_PROMPT, EXECUTOR_AGENT_TOOLS)
+@lru_cache(maxsize=16)
+def get_executor_agent(system_prompt: str | None = None, execution_mode: str = "autonomous") -> Any:
+    tools = executor_tool_names_for_mode(execution_mode)
+    base = system_prompt or EXECUTOR_AGENT_PROMPT
+    if (execution_mode or "").strip().lower() == "advisory":
+        base = (
+            base
+            + "\n\nEXECUTION MODE IS ADVISORY: you must not claim that live production changes were applied. "
+            "Use kubernetes_server_side_apply_dry_run when validating manifests. "
+            "Spell out exact kubectl or rollout commands for a human operator to run."
+        )
+    return _compile_agent("ExecutorAgent", base, tools)
 
 
 @lru_cache(maxsize=None)

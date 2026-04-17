@@ -50,7 +50,7 @@ from .observability import (
     loki_query_range,
     prometheus_query,
 )
-from .qdrant_memory import embed_query_text, qdrant_search_similar_incidents
+from .qdrant_memory import embed_query_text, qdrant_search_similar_incidents, qdrant_upsert_incident_memory
 
 __all__ = [
     "check_observability_backends",
@@ -84,6 +84,7 @@ __all__ = [
     "patch_deployment_env_or_resources",
     "prometheus_query",
     "qdrant_search_similar_incidents",
+    "qdrant_upsert_incident_memory",
     "rollout_undo",
     "run_detection_check",
     "set_deployment_image",

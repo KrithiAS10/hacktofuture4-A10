@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import time
 from typing import Any, Dict, List, Optional
+
+from kubernetes.client import ApiException
 
 from ._k8s import assert_namespace_allowed, get_k8s, sanitize
 
@@ -29,22 +32,43 @@ def get_pod_logs(
     container: Optional[str] = None,
     tail_lines: int = 100,
     previous: bool = False,
+    retry_attempts: int = 4,
+    retry_delay_seconds: float = 1.0,
 ) -> Dict[str, Any]:
     assert_namespace_allowed(namespace)
     apis, kerr = get_k8s()
     if not apis:
         return _err(kerr or "k8s unavailable")
-    try:
-        logs = apis.core.read_namespaced_pod_log(
-            name=pod_name,
-            namespace=namespace,
-            container=container,
-            tail_lines=tail_lines,
-            previous=previous,
-        )
-        return {"ok": True, "logs": logs}
-    except Exception as exc:  # pylint: disable=broad-except
-        return _err(str(exc))
+    attempts = max(1, int(retry_attempts))
+    last_err: Optional[str] = None
+    for attempt in range(attempts):
+        try:
+            logs = apis.core.read_namespaced_pod_log(
+                name=pod_name,
+                namespace=namespace,
+                container=container,
+                tail_lines=tail_lines,
+                previous=previous,
+            )
+            out: Dict[str, Any] = {"ok": True, "logs": logs}
+            if attempt > 0:
+                out["note"] = f"Succeeded after {attempt + 1} attempt(s); earlier failures were likely transient."
+            return out
+        except ApiException as exc:
+            last_err = str(exc)
+            if exc.status == 404 and attempt < attempts - 1:
+                time.sleep(retry_delay_seconds)
+                continue
+            break
+        except Exception as exc:  # pylint: disable=broad-except
+            last_err = str(exc)
+            break
+    err = last_err or "unknown error"
+    hint = (
+        "If the pod was replaced (CrashLoop, rollout), the name from an older snapshot may be stale—"
+        "call kubernetes_cluster_snapshot or list pods again. For logs from the last crashed instance, try previous=true."
+    )
+    return {**_err(err), "hint": hint}
 
 
 def list_recent_events(

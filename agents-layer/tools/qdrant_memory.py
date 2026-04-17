@@ -16,6 +16,21 @@ _fastembed_model: Any = None
 _sentence_transformer_model: Any = None
 
 
+def _ensure_collection_exists(client: Any, coll: str, vector_size: int) -> None:
+    from qdrant_client.models import Distance, VectorParams  # type: ignore[import-untyped]
+
+    if client.collection_exists(collection_name=coll):
+        return
+    try:
+        client.create_collection(
+            collection_name=coll,
+            vectors_config=VectorParams(size=vector_size, distance=Distance.COSINE),
+        )
+    except Exception:  # pylint: disable=broad-except
+        if not client.collection_exists(collection_name=coll):
+            raise
+
+
 def _embed_fastembed(text: str) -> Tuple[List[float], Dict[str, Any]]:
     try:
         from fastembed import TextEmbedding  # type: ignore[import-untyped]
@@ -146,6 +161,7 @@ def qdrant_search_similar_incidents(
     coll = collection or settings.qdrant_collection
     try:
         client = QdrantClient(url=settings.qdrant_url, api_key=settings.qdrant_api_key)
+        _ensure_collection_exists(client, coll, len(query_vector))
         kwargs: Dict[str, Any] = {
             "collection_name": coll,
             "query": query_vector,
@@ -171,4 +187,51 @@ def qdrant_search_similar_incidents(
             "embed_meta": embed_meta,
         }
     except Exception as exc:  # pylint: disable=broad-except
+        return {"ok": False, "error": str(exc), "embed_meta": embed_meta}
+
+
+def qdrant_upsert_incident_memory(
+    embedding_source_text: str,
+    payload: Dict[str, Any],
+    point_id: str,
+    collection: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Embed `embedding_source_text` and upsert one point into Qdrant (incident memory).
+
+    `point_id` must be unique per stored report (e.g. UUID string). Payload is stored as-is
+    (keep values JSON-friendly: strings, numbers, booleans).
+    """
+    try:
+        from qdrant_client import QdrantClient  # type: ignore[import-untyped]
+        from qdrant_client.models import PointStruct  # type: ignore[import-untyped]
+    except ImportError:
+        return {"ok": False, "error": "qdrant-client not installed; pip install qdrant-client"}
+
+    text = (embedding_source_text or "").strip()
+    if not text:
+        return {"ok": False, "error": "embedding_source_text is empty"}
+
+    try:
+        vector, embed_meta = embed_query_text(text)
+    except Exception as exc:  # pylint: disable=broad-except
+        logger.exception("Embedding failed for upsert")
+        return {"ok": False, "error": str(exc), "embed_meta": None}
+
+    coll = collection or settings.qdrant_collection
+    try:
+        client = QdrantClient(url=settings.qdrant_url, api_key=settings.qdrant_api_key)
+        _ensure_collection_exists(client, coll, len(vector))
+        client.upsert(
+            collection_name=coll,
+            points=[PointStruct(id=point_id, vector=vector, payload=payload)],
+        )
+        return {
+            "ok": True,
+            "collection": coll,
+            "point_id": point_id,
+            "embed_meta": embed_meta,
+        }
+    except Exception as exc:  # pylint: disable=broad-except
+        logger.exception("Qdrant upsert failed")
         return {"ok": False, "error": str(exc), "embed_meta": embed_meta}

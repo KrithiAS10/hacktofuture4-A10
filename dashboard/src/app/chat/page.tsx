@@ -4,8 +4,8 @@ import { useState, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Send } from "lucide-react";
 import { Badge, PageHeader } from "@/components/ui";
-import { chatWithOrchestrator } from "@/lib/observation-api";
-import type { ChatMessage } from "@/lib/mock-data";
+import { chatWithOrchestrator, type ChatMessage } from "@/lib/observation-api";
+import { formatClockNow } from "@/lib/datetime";
 import clsx from "clsx";
 
 function renderContent(text: string) {
@@ -51,8 +51,7 @@ export default function ChatPage() {
   }, [messages, isTyping]);
 
   function now() {
-    const d = new Date();
-    return `${d.getHours()}:${String(d.getMinutes()).padStart(2, "0")}:${String(d.getSeconds()).padStart(2, "0")}`;
+    return formatClockNow();
   }
 
   async function send(text: string) {

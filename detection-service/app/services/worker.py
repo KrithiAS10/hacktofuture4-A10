@@ -60,6 +60,27 @@ class DetectionWorker:
             await asyncio.sleep(settings.poll_interval_seconds)
 
     async def _tick(self) -> None:
+        execution_mode = await self._state_store.get_agents_execution_mode()
+        if execution_mode == "paused":
+            # Still observe signals for the operator UI; never auto-trigger agents or retries.
+            snapshot = await self._snapshot_service.get_snapshot()
+            if not snapshot.get("available"):
+                reason = snapshot.get("reason")
+                logger.warning("Detection: cluster snapshot unavailable (%s)", reason)
+                self._last_result = {"status": "degraded", "reason": reason, "execution_mode": execution_mode}
+                return
+            loki_raw = await self._obs_service.query_logs(query=settings.log_query, limit=settings.log_limit)
+            result = build_detection_run_result(loki_raw, snapshot)
+            self._last_result = {
+                "status": "paused",
+                "execution_mode": execution_mode,
+                "checked_at": result.check.checked_at,
+                "has_error": result.check.has_error,
+                "summary": result.check.summary,
+                "incident_id": result.incident.incident_id if result.incident else None,
+            }
+            return
+
         await self._process_retries()
         snapshot = await self._snapshot_service.get_snapshot()
         if not snapshot.get("available"):
@@ -80,6 +101,18 @@ class DetectionWorker:
         if not result.incident:
             return
 
+        payload = result.incident.model_dump()
+        summary_hash = hashlib.sha1(
+            f"{result.incident.summary}:{result.incident.dominant_signature}".encode("utf-8")
+        ).hexdigest()
+        should_emit = await self._state_store.should_emit(result.incident.fingerprint, summary_hash)
+        if not should_emit:
+            logger.debug(
+                "Detection: dedupe suppressing repeat fingerprint=%s",
+                result.incident.fingerprint,
+            )
+            return
+
         inc = result.incident
         logger.info(
             "Detection: incident found id=%s class=%s service=%s namespace=%s severity=%s errors=%s",
@@ -90,19 +123,6 @@ class DetectionWorker:
             inc.severity,
             result.check.summary.get("error_count"),
         )
-
-        payload = result.incident.model_dump()
-        summary_hash = hashlib.sha1(
-            f"{result.incident.summary}:{result.incident.dominant_signature}".encode("utf-8")
-        ).hexdigest()
-        should_emit = await self._state_store.should_emit(result.incident.fingerprint, summary_hash)
-        if not should_emit:
-            logger.info(
-                "Detection: skipping emit (dedupe) fingerprint=%s incident_id=%s",
-                result.incident.fingerprint,
-                result.incident.incident_id,
-            )
-            return
 
         try:
             response = await self._agents_client.trigger_incident(payload)

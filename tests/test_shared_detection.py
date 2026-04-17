@@ -40,6 +40,7 @@ def test_shared_detection_builds_incident_for_error_logs():
     assert result.incident.namespace == "lerna"
     assert result.incident.incident_class in {"timeout", "crashloop", "application-error"}
     assert result.incident.fingerprint
+    assert result.incident.cost == 0.0
 
 
 def test_shared_detection_skips_incident_when_only_info_signals_exist():
